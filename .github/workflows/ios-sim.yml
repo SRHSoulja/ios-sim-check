@@ -38,14 +38,18 @@ jobs:
           case "$WAIT" in ''|*[!0-9]*) WAIT=20;; esac
           W="$WAIT"; i=0
           read -ra LIST <<< "$URLS"
+          # warm up Mobile Safari so the first real page does not race its start-up
+          xcrun simctl openurl "$UDID" "about:blank" || true; sleep 15
           for u in "${LIST[@]}"; do
             i=$((i+1)); n=$(printf '%02d' $i)
             echo "$n $u" | tee -a shots/index.txt
-            xcrun simctl openurl "$UDID" "$u"
+            # 3 tries: the first openurl after boot can time out (error 60) while Safari starts (2026-11-03)
+            ok=0; for t in 1 2 3; do if xcrun simctl openurl "$UDID" "$u"; then ok=1; break; fi; echo "openurl try $t failed"; sleep 10; done
+            if [ "$ok" != 1 ]; then echo "$n FAILED to open" | tee -a shots/index.txt; continue; fi
             sleep "$W"
-            xcrun simctl io "$UDID" screenshot "shots/$n.png"
+            xcrun simctl io "$UDID" screenshot "shots/$n.png" || echo "$n screenshot failed" | tee -a shots/index.txt
             sleep 3
-            xcrun simctl io "$UDID" screenshot "shots/$n-b.png"
+            xcrun simctl io "$UDID" screenshot "shots/$n-b.png" || true
           done
           echo "device: $DEV_NAME" >> shots/index.txt
           cat runtime.txt >> shots/index.txt 2>/dev/null || true
