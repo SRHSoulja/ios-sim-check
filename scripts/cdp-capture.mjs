@@ -92,6 +92,7 @@ res.info.innerWidth = await ev('innerWidth');
 res.info.innerHeight = await ev('innerHeight');
 res.info.dpr = await ev('devicePixelRatio');
 res.info.ua = await ev('navigator.userAgent');
+res.info.pointer = await ev("['(pointer: coarse)','(pointer: fine)','(any-pointer: coarse)','(hover: none)'].filter(q=>matchMedia(q).matches).join(' ')+' touchPoints='+navigator.maxTouchPoints");
 res.info.webgl = await ev("(()=>{try{const g=document.createElement('canvas').getContext('webgl');return g?g.getParameter(g.RENDERER):'none'}catch(e){return String(e)}})()");
 res.info.bodyTextStart = await ev('(document.body&&document.body.innerText||"").slice(0,300)');
 if (u0.protocol === 'chrome:') res.info.bodyText = await ev('(document.body&&document.body.innerText||"").slice(0,12000)');

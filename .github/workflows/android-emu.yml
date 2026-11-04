@@ -7,7 +7,7 @@ on:
       urls: { description: "space-separated public URLs", required: true }
       wait: { description: "seconds to wait after each page opens", required: false, default: "20" }
       device: { description: "AVD hardware profile (pixel_7 = 1080x2400, 412dp wide)", required: false, default: "pixel_7" }
-      api: { description: "Android API level (google_apis image ships Chrome)", required: false, default: "34" }
+      api: { description: "Android API level. 36 = Chrome 133 (default), 35 = Chrome 124, 34 = Chrome 113: 34 draws large 2D canvases blank on swiftshader, do not use it for canvas/WebGL pages", required: false, default: "36" }
       target: { description: "system image target (google_apis; playstore images are not rootable, Chrome flags then ignored)", required: false, default: "google_apis" }
       gpu: { description: "emulator -gpu mode (runner has no GPU: swiftshader_indirect, guest, host, auto)", required: false, default: "swiftshader_indirect" }
       chrome_flags: { description: "extra Chrome command-line flags, e.g. --disable-gpu-rasterization", required: false, default: "" }
