@@ -20,6 +20,11 @@ adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || tru
 adb shell settings put global hide_error_dialogs 1 || true
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 adb shell am force-stop $PKG
+# warm Chrome once (cold start on the first URL left no devtools target in time, run 41868447220): open about:blank and
+# wait for the devtools socket to list a page, up to 30 s
+adb shell am start -a android.intent.action.VIEW -d about:blank $PKG >/dev/null 2>&1 || true
+adb forward tcp:9222 localabstract:chrome_devtools_remote >/dev/null 2>&1 || true
+for t in $(seq 1 15); do curl -s --max-time 2 http://localhost:9222/json 2>/dev/null | grep -q '"type": *"page"' && break; sleep 2; done
 i=0
 for u in "${LIST[@]}"; do
   i=$((i+1)); n=$(printf '%02d' $i)
