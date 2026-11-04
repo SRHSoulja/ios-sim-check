@@ -1,0 +1,40 @@
+# Open public URLs in Chrome on an Android emulator (KVM), screenshot them and capture console errors over CDP.
+# Run: gh workflow run android-emu.yml -R SRHSoulja/ios-sim-check -f urls="https://example.com https://example.org" -f wait=20
+name: android-emu
+on:
+  workflow_dispatch:
+    inputs:
+      urls: { description: "space-separated public URLs", required: true }
+      wait: { description: "seconds to wait after each page opens", required: false, default: "20" }
+      device: { description: "AVD hardware profile (pixel_7 = 1080x2400, 412dp wide)", required: false, default: "pixel_7" }
+      api: { description: "Android API level (google_apis image ships Chrome)", required: false, default: "34" }
+permissions: { contents: read }
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator, Chrome, screenshots, console capture
+        # Inputs go in through env, never pasted into the script (an & or ; in a URL breaks the shell).
+        # The action runs each script line in its own sh, so all logic lives in scripts/android-shots.sh.
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env: { URLS: "${{ inputs.urls }}", WAIT: "${{ inputs.wait }}", DEV_NAME: "${{ inputs.device }}" }
+        with:
+          api-level: ${{ inputs.api }}
+          target: google_apis
+          arch: x86_64
+          profile: ${{ inputs.device }}
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash scripts/android-shots.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: android-shots, path: shots, retention-days: 7 }
