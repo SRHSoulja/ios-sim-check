@@ -30,7 +30,7 @@ for u in "${LIST[@]}"; do
   adb forward --remove-all >/dev/null 2>&1 || true
   adb forward tcp:9222 localabstract:chrome_devtools_remote
   # attach over CDP, replay the load to catch console/page/network errors for WAIT seconds
-  node scripts/cdp-capture.mjs "$u" "$WAIT" "shots/$n.json" || echo "$n cdp capture failed" | tee -a shots/index.txt
+  timeout $((WAIT+90)) node scripts/cdp-capture.mjs "$u" "$WAIT" "shots/$n.json" || echo "$n cdp capture failed" | tee -a shots/index.txt
   adb exec-out screencap -p > "shots/$n.png" || echo "$n screenshot failed" | tee -a shots/index.txt
   sleep 3
   adb exec-out screencap -p > "shots/$n-b.png" || true

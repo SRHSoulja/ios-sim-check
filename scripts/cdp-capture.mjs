@@ -16,7 +16,7 @@ const res = { url, errors: [], warnings: [], exceptions: [], log: [], network: [
 const save = () => writeFileSync(out, JSON.stringify(res, null, 2));
 let targets = [];
 for (let t = 0; t < 10 && !targets.length; t++) {
-  try { targets = (await (await fetch('http://localhost:9222/json')).json()).filter(x => x.type === 'page'); } catch {}
+  try { targets = (await (await fetch('http://localhost:9222/json', { signal: AbortSignal.timeout(5000) })).json()).filter(x => x.type === 'page'); } catch {}
   if (!targets.length) await new Promise(r => setTimeout(r, 1500));
 }
 if (!targets.length) { res.info.fatal = 'no devtools page target'; save(); process.exit(1); }
@@ -24,9 +24,12 @@ const u0 = new URL(url), host = u0.host;
 const hit = targets.find(x => (x.url || '').includes(host)), tg = hit || targets[0];
 res.info.target = tg.url;
 const ws = new WebSocket(tg.webSocketDebuggerUrl);
-await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; });
+await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; setTimeout(() => bad(new Error('ws open timeout')), 10000); });
 let id = 0; const pending = new Map();
-const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+// every call has a timeout (a hung evaluate or screenshot on old Chrome stalled the whole job, 2026-11-04): it resolves
+// { timeout: method } and the stage is noted in info.stages, so the JSON always says how far it got
+const send = (method, params = {}, ms = 15000) => new Promise(r => { const i = ++id; const t = setTimeout(() => { pending.delete(i); r({ timeout: method }); }, ms); pending.set(i, v => { clearTimeout(t); r(v); }); ws.send(JSON.stringify({ id: i, method, params })); });
+const stage = s => { (res.info.stages ||= []).push(s); save(); };
 const reqs = new Map();
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
@@ -80,7 +83,9 @@ await send('Page.addScriptToEvaluateOnNewDocument', { source: HOOK });
 // the intent opened the page: reload it so the hook runs first. No tab for it (chrome:// URLs are refused by intent): navigate there.
 if (hit) await send('Page.reload', { ignoreCache: true }); else { res.info.navigated = true; await send('Page.navigate', { url }); }
 await new Promise(r => setTimeout(r, Number(secs) * 1000));
-const ev = async e => { const r = await send('Runtime.evaluate', { expression: e, returnByValue: true }); return r?.result?.value ?? (r?.exceptionDetails ? 'EVAL ERROR ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text) : undefined); };
+const ev = async e => { const r = await send('Runtime.evaluate', { expression: e, returnByValue: true, timeout: 10000 });
+  if (r?.timeout) return 'EVAL TIMEOUT'; return r?.result?.value ?? (r?.exceptionDetails ? 'EVAL ERROR ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text) : undefined); };
+stage('waited');
 res.info.title = await ev('document.title');
 res.info.href = await ev('location.href');
 res.info.innerWidth = await ev('innerWidth');
@@ -90,10 +95,10 @@ res.info.ua = await ev('navigator.userAgent');
 res.info.webgl = await ev("(()=>{try{const g=document.createElement('canvas').getContext('webgl');return g?g.getParameter(g.RENDERER):'none'}catch(e){return String(e)}})()");
 res.info.bodyTextStart = await ev('(document.body&&document.body.innerText||"").slice(0,300)');
 if (u0.protocol === 'chrome:') res.info.bodyText = await ev('(document.body&&document.body.innerText||"").slice(0,12000)');
-else res.probe = await ev(PROBE);
+else { stage('info'); res.probe = await ev(PROBE); stage('probe'); }
 try {
-  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  const shot = await send('Page.captureScreenshot', { format: 'png' }, 20000);
   if (shot?.data) writeFileSync(out.replace(/\.json$/, '-cdp.png'), Buffer.from(shot.data, 'base64'));
   else res.info.cdpShot = 'failed ' + JSON.stringify(shot).slice(0, 200);
 } catch (e) { res.info.cdpShot = 'failed ' + e; }
-save(); ws.close(); process.exit(0);
+stage('done'); ws.close(); process.exit(0);

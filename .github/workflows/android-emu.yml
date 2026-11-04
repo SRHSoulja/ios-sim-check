@@ -28,6 +28,8 @@ jobs:
       - name: Emulator, Chrome, screenshots, console capture
         # Inputs go in through env, never pasted into the script (an & or ; in a URL breaks the shell).
         # The action runs each script line in its own sh, so all logic lives in scripts/android-shots.sh.
+        # step timeout (not only the job's) so the upload below still runs and keeps the shots taken so far
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env: { URLS: "${{ inputs.urls }}", WAIT: "${{ inputs.wait }}", DEV_NAME: "${{ inputs.device }}", GPU: "${{ inputs.gpu }}", CHROME_FLAGS: "${{ inputs.chrome_flags }}" }
         with:
