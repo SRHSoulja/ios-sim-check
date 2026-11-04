@@ -15,10 +15,11 @@ jobs:
     steps:
       - name: Boot an iPhone simulator
         id: sim
+        env: { DEVICE: "${{ inputs.device }}" }
         run: |
           set -euo pipefail
           xcrun simctl list devices available | grep -E "iPhone" | head -20
-          NAME="${{ inputs.device }}"
+          NAME="$DEVICE"
           if [ -z "$NAME" ]; then NAME=$(xcrun simctl list devices available | grep -E "^\s+iPhone [0-9]+ \(" | tail -1 | sed -E 's/^ +(iPhone [0-9]+) \(.*/\1/'); fi
           UDID=$(xcrun simctl list devices available | grep -F "$NAME (" | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
           echo "device=$NAME udid=$UDID"
@@ -29,11 +30,15 @@ jobs:
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           xcrun simctl getenv "$UDID" SIMULATOR_RUNTIME_VERSION | tee runtime.txt || true
       - name: Open each URL in Mobile Safari and screenshot
+        # Inputs go in through env, never pasted into the script: an & or ; in a URL broke the shell (2026-11-03).
+        env: { URLS: "${{ inputs.urls }}", WAIT: "${{ inputs.wait }}", UDID: "${{ steps.sim.outputs.udid }}", DEV_NAME: "${{ steps.sim.outputs.name }}" }
         run: |
           set -uo pipefail
           mkdir -p shots
-          UDID="${{ steps.sim.outputs.udid }}"; W="${{ inputs.wait }}"; i=0
-          for u in ${{ inputs.urls }}; do
+          case "$WAIT" in ''|*[!0-9]*) WAIT=20;; esac
+          W="$WAIT"; i=0
+          read -ra LIST <<< "$URLS"
+          for u in "${LIST[@]}"; do
             i=$((i+1)); n=$(printf '%02d' $i)
             echo "$n $u" | tee -a shots/index.txt
             xcrun simctl openurl "$UDID" "$u"
@@ -42,7 +47,7 @@ jobs:
             sleep 3
             xcrun simctl io "$UDID" screenshot "shots/$n-b.png"
           done
-          echo "device: ${{ steps.sim.outputs.name }}" >> shots/index.txt
+          echo "device: $DEV_NAME" >> shots/index.txt
           cat runtime.txt >> shots/index.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with: { name: ios-shots, path: shots, retention-days: 7 }
