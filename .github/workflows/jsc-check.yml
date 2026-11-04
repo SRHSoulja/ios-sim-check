@@ -1,0 +1,47 @@
+# Parse a page's JavaScript with Safari's own engine (JavaScriptCore, `jsc` on the macOS runner) and print any error.
+# Catches syntax that Chrome/Node accept and Safari rejects (2026-11-03: straycucks.com/city/ was blank on iPhone only).
+# Run: gh workflow run jsc-check.yml -R SRHSoulja/ios-sim-check -f urls="https://example.com/page/"
+name: jsc-check
+on:
+  workflow_dispatch:
+    inputs:
+      urls: { description: "space-separated public page or .js/.mjs URLs", required: true }
+permissions: { contents: read }
+jobs:
+  jsc:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Parse each page's scripts with JavaScriptCore
+        env: { URLS: "${{ inputs.urls }}" }
+        run: |
+          set -uo pipefail
+          JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc
+          [ -x "$JSC" ] || JSC=$(find /System/Library/Frameworks/JavaScriptCore.framework -name jsc -type f | head -1)
+          echo "jsc: $JSC"; sw_vers
+          mkdir -p work && cd work
+          read -ra LIST <<< "$URLS"; i=0
+          for u in "${LIST[@]}"; do
+            i=$((i+1)); curl -sL "$u" -o "page$i"
+            case "$u" in
+              *.js|*.mjs) cp "page$i" "s$i-0.mjs";;
+              *) python3 - "$i" <<'PY'
+          import re, sys
+          i = sys.argv[1]; s = open('page' + i, encoding='utf-8', errors='replace').read()
+          for n, (attrs, body) in enumerate(re.findall(r'<script([^>]*)>(.*?)</script>', s, re.S)):
+              if 'src=' in attrs or 'importmap' in attrs or not body.strip(): continue
+              ext = 'mjs' if 'module' in attrs else 'js'
+              # imports cannot resolve here; replace them so only this script's own syntax is checked
+              if ext == 'mjs': body = re.sub(r'^\s*import\s[^;]*;', '', body, flags=re.M)
+              open(f's{i}-{n}.{ext}', 'w').write(body)
+          PY
+              ;;
+            esac
+            for f in s$i-*; do
+              [ -e "$f" ] || continue
+              # parse only (jsc shell built-ins checkSyntax / checkModuleSyntax): nothing runs, so no DOM errors
+              case "$f" in *.mjs) expr="checkModuleSyntax(read('$f'))";; *) expr="checkSyntax('$f')";; esac
+              out=$("$JSC" -e "try { $expr; print('PARSE OK') } catch (e) { print('PARSE ERROR: ' + e) }" 2>&1)
+              echo "== $u :: $f ($(wc -c < "$f") bytes)"; echo "$out" | head -8
+            done
+          done
