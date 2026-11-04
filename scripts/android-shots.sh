@@ -14,6 +14,9 @@ adb shell "echo '_ --disable-fre --no-first-run --no-default-browser-check' > /d
 adb shell chmod 755 /data/local/tmp/chrome-command-line
 adb shell am set-debug-app --persistent $PKG || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+# software emulator makes Pixel Launcher ANR ("isn't responding" dialog over the page): hide error dialogs
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 adb shell am force-stop $PKG
 i=0
 for u in "${LIST[@]}"; do
