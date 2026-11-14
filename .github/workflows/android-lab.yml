@@ -1,0 +1,74 @@
+# Drive room pages (menu, Diorama, taps) in Android browsers on an emulator: the image's Chrome, a Chromium snapshot,
+# a Chromium WebView (the engine every Android wallet's in-app browser uses) in its test shell, and MetaMask's own
+# in-app browser (official APK from MetaMask's GitHub release, sha256 and signature checked, throwaway wallet).
+# Run: gh workflow run android-lab.yml -R SRHSoulja/ios-sim-check -f phases="chrome chromium webview" \
+#        -f urls="https://straycucks.com/alive/312#pchtml&perf" -f os_url="https://straycucks.com/alive/312"
+name: android-lab
+on:
+  workflow_dispatch:
+    inputs:
+      phases: { description: "chrome chromium webview webview-stock metamask (space-separated)", required: true, default: "chrome" }
+      urls: { description: "space-separated public room URLs", required: true }
+      os_url: { description: "animation_url to frame OpenSea-style (blank = skip)", required: false, default: "" }
+      api: { description: "Android API level (36 = Chrome 133; never 34 for canvas/WebGL)", required: false, default: "36" }
+      chromium_rev: { description: "Chromium snapshot revision in AndroidDesktop_x64 (blank = LAST_CHANGE)", required: false, default: "" }
+      metamask_tag: { description: "MetaMask mobile release tag, e.g. v8.19.0", required: false, default: "v8.19.0" }
+      mm_steps: { description: "max first-run steps for the MetaMask walk", required: false, default: "30" }
+permissions: { contents: read }
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Fetch APKs (Chromium snapshot, MetaMask release), verify
+        env: { PHASES: "${{ inputs.phases }}", REV: "${{ inputs.chromium_rev }}", MM_TAG: "${{ inputs.metamask_tag }}", GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -euo pipefail
+          mkdir -p apks shots
+          case "$REV" in *[!0-9]*) echo "bad rev"; exit 1;; esac
+          case "$MM_TAG" in *[!A-Za-z0-9._-]*) echo "bad tag"; exit 1;; esac
+          B=https://commondatastorage.googleapis.com/chromium-browser-snapshots/AndroidDesktop_x64
+          if echo " $PHASES " | grep -qE ' (chromium|webview|webview-stock) '; then
+            [ -n "$REV" ] || REV=$(curl -sf $B/LAST_CHANGE)
+            echo "chromium snapshot r$REV" | tee -a shots/index-fetch.txt
+            curl -sfL -o /tmp/cad.zip "$B/$REV/chrome-android-desktop.zip"
+            unzip -j -o /tmp/cad.zip 'chrome-android-desktop/apks/ChromePublic.apk' 'chrome-android-desktop/apks/SystemWebView.apk' 'chrome-android-desktop/apks/SystemWebViewShell.apk' -d apks
+            rm -f /tmp/cad.zip; sha256sum apks/*.apk | tee -a shots/index-fetch.txt
+          fi
+          if echo " $PHASES " | grep -q ' metamask '; then
+            gh release download "$MM_TAG" -R MetaMask/metamask-mobile -p '*.apk' -D /tmp/mm
+            f=$(ls /tmp/mm/*.apk | head -1); want=$(gh api "repos/MetaMask/metamask-mobile/releases/tags/$MM_TAG" --jq ".assets[] | select(.name==\"$(basename "$f")\") | .digest")
+            got="sha256:$(sha256sum "$f" | cut -d' ' -f1)"
+            echo "metamask $(basename "$f") github digest $want, file $got" | tee -a shots/index-fetch.txt
+            [ "$want" = "$got" ] || { echo "DIGEST MISMATCH"; exit 1; }
+            AS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)apksigner
+            "$AS" verify --verbose --print-certs "$f" 2>&1 | grep -vi '^WARNING' | head -20 | tee -a shots/index-fetch.txt
+            mv "$f" apks/metamask.apk
+          fi
+          df -h . | tail -1
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator and the lab
+        # inputs through env only; all logic in scripts/android-lab.sh (the action runs each script line in its own sh)
+        timeout-minutes: 105
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env: { PHASES: "${{ inputs.phases }}", URLS: "${{ inputs.urls }}", OS_URL: "${{ inputs.os_url }}", MM_STEPS: "${{ inputs.mm_steps }}" }
+        with:
+          api-level: ${{ inputs.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 4096M
+          disk-size: 8000M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash scripts/android-lab.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: android-lab, path: shots, retention-days: 7 }
