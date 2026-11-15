@@ -82,6 +82,8 @@ async function walletApprove(mm, doneExpr, maxS = 120) {
   while (Date.now() - t0 < maxS * 1000) {
     const done = await mm.ev(doneExpr);
     if (done === true) return { ok: true, seen };
+    const err = await mm.ev(`(document.getElementById('out-st')||{}).innerText||''`);
+    if (/did not answer|cancelled|already has a request/i.test(String(err))) return { ok: false, seen, pageError: err };
     const nodes = ui(); const texts = nodes.filter(n => n.label && n.box).map(n => n.label);
     const pkg = nodes[0] && nodes[0].package;
     if (texts.some(t => /\b(buy|deposit|transak|send|swap|bridge|pay with)\b/i.test(t)) && !texts.some(t => /^(connect|confirm|sign)$/i.test(t))) { seen.push({ pkg, texts: texts.slice(0, 40), did: 'money-looking screen: nothing pressed' }); await sleep(3000); continue; }
@@ -102,10 +104,12 @@ async function toX(c, btnSel, tag, maxS = 90) {
     if (/(^https:\/\/([a-z]+\.)?(x|twitter)\.com\/)/.test(u)) { r.reachedX = true; r.xUrl = red(u); break; }
     const st = await c.ev(`(function(){var f=document.querySelector('#ts iframe'); var r=f&&f.getBoundingClientRect(); return {iframe:!!f, box:r?[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)]:null, st:[].slice.call(document.querySelectorAll('.status')).map(function(e){return e.innerText.trim()}).filter(Boolean)}})()`);
     r.lastPage = st;
-    if (st && st.box && st.box[2] > 0 && tsTapped < 2 && Date.now() - t0 > 12000 * (tsTapped + 1)) {
-      // Turnstile's interactive box: its checkbox sits about 30 px from the left edge, mid height
-      await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: st.box[0] + 30, y: st.box[1] + st.box[3] / 2, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
-      await sleep(80); await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); tsTapped++; r.tsTapped = tsTapped;
+    if (tsTapped < 3 && Date.now() - t0 > 10000 * (tsTapped + 1)) {
+      // Turnstile's interactive box ("Verify you are human"): it sits in a closed shadow root, so '#ts iframe' finds
+      // nothing (run 43683584888); a real touch through Android on the node uiautomator sees
+      const nodes = ui(); const cb = nodes.find(n => n.box && /CheckBox/.test(n.class || '') ) || nodes.find(n => n.box && /^Verify you are human$/i.test(n.label));
+      r.tsSeen = nodes.filter(n => /verify|human|success|fail|checking|stuck|refresh/i.test(n.label)).map(n => n.label).slice(0, 8);
+      if (cb) { const x = Math.round((cb.box[0] + cb.box[2]) / 2), y = Math.round((cb.box[1] + cb.box[3]) / 2); adb('shell', 'input', 'tap', String(x), String(y)); tsTapped++; r.tsTapped = tsTapped; r.tsTap = [x, y, cb.class, cb.label]; }
     }
   }
   if (r.reachedX) {
@@ -150,8 +154,11 @@ try {
   if (!/\/me$|\/me\?|\/me#/.test(String(await mm.url()))) { await mm.ev(`location.assign(${JSON.stringify(URL0)}), true`); await sleep(8000); }
   await waitFor(mm, `document.getElementById('loading').hidden`, 30);
   await mm.ev(`(function(){var a=document.getElementById('age'); if(a&&!a.checked){a.click()} return true})()`);
+  // every wallet request the page makes, with its answer or error (run 43683584888: personal_sign failed "must provide an Ethereum address")
+  B.hook = await mm.ev(`(function(){window.__ethlog=[];function wrap(p,n){if(!p||p.__w)return;p.__w=1;var o=p.request.bind(p);p.request=function(a){var e={n:n,m:a&&a.method,p:JSON.stringify(a&&a.params||null).slice(0,200)};window.__ethlog.push(e);return o(a).then(function(r){e.r=JSON.stringify(r).slice(0,200);return r},function(x){e.err=String(x&&x.message)+' code='+(x&&x.code);throw x})}}wrap(window.ethereum,'window.ethereum');window.addEventListener('eip6963:announceProvider',function(ev){wrap(ev.detail.provider,(ev.detail.info&&ev.detail.info.name)||'6963')});window.dispatchEvent(new Event('eip6963:requestProvider'));return true})()`);
   B.tap = await mm.tapSel('#signin');
   B.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
+  B.eth = await mm.ev('window.__ethlog');
   B.page = await mm.ev(VIS(['in', 'out-st', 'w-count', 'wallets', 'x', 'x-new', 'x-a', 'x-ho', 'x-oauth', 'x-a-note', 'x-st']));
   B.shot = await mm.shot('B1-signed-in', '#w-h');
   B.pass = !!B.page?.in?.shown;
