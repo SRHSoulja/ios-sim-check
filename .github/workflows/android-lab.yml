@@ -7,7 +7,7 @@ name: android-lab
 on:
   workflow_dispatch:
     inputs:
-      phases: { description: "chrome chromium webview webview-stock metamask (space-separated)", required: true, default: "chrome" }
+      phases: { description: "chrome chromium webview webview-stock metamask xconnect (space-separated)", required: true, default: "chrome" }
       urls: { description: "space-separated public room URLs", required: true }
       os_url: { description: "animation_url to frame OpenSea-style (blank = skip)", required: false, default: "" }
       api: { description: "Android API level (36 = Chrome 133; never 34 for canvas/WebGL)", required: false, default: "36" }
@@ -38,7 +38,7 @@ jobs:
             unzip -j -o /tmp/cad.zip 'chrome-android-desktop/apks/ChromePublic.apk' 'chrome-android-desktop/apks/SystemWebView.apk' 'chrome-android-desktop/apks/SystemWebViewShell.apk' -d apks
             rm -f /tmp/cad.zip; sha256sum apks/*.apk | tee -a shots/index-fetch.txt
           fi
-          if echo " $PHASES " | grep -q ' metamask '; then
+          if echo " $PHASES " | grep -qE ' (metamask|xconnect) '; then
             gh release download "$MM_TAG" -R MetaMask/metamask-mobile -p '*.apk' -D /tmp/mm
             f=$(ls /tmp/mm/*.apk | head -1); want=$(gh api "repos/MetaMask/metamask-mobile/releases/tags/$MM_TAG" --jq ".assets[] | select(.name==\"$(basename "$f")\") | .digest")
             got="sha256:$(sha256sum "$f" | cut -d' ' -f1)"

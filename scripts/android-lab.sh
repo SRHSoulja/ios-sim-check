@@ -4,7 +4,8 @@
 #   PHASES  space list of: chrome (the image's own Chrome), chromium (apks/ChromePublic.apk, a Chromium snapshot),
 #           webview (apks/SystemWebView.apk made the WebView provider + apks/SystemWebViewShell.apk as the browser),
 #           webview-stock (the shell on the image's own WebView), metamask (apks/metamask.apk, walked through first run
-#           with a throwaway wallet, the url opened in its in-app browser)
+#           with a throwaway wallet, the url opened in its in-app browser), xconnect (the X connect cases on a /me
+#           url inside MetaMask's browser, Chrome as the second browser: scripts/xconnect-lab.mjs)
 #   URLS    room page urls (each gets a room-lab run per browser)
 #   OS_URL  the NFT's animation_url, framed OpenSea-style (HARNESS=1) twice: as is + "#perf", and + "#pchtml&perf"
 set -uo pipefail
@@ -49,6 +50,29 @@ webview_shell() {   # $1 label
   curl -s http://localhost:9222/json/version > "shots/$1-version.json"; note "$1 $sock $(tr -d '\n' < shots/$1-version.json | grep -o '"User-Agent": *"[^"]*"')"
   labs "$1"
 }
+mm_setup() {   # install MetaMask (the verified release APK) and walk its first run with a throwaway wallet
+  adb install -r -g apks/metamask.apk 2>&1 | tail -1 | tee -a shots/index.txt
+  adb shell dumpsys package io.metamask | grep -m1 versionName | tee -a shots/index.txt
+  adb shell monkey -p io.metamask -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 20
+  # a throwaway wallet: random password made here, never printed or kept; MetaMask's screens are FLAG_SECURE, so
+  # adb screencaps of them come out black (the texts in mm-walk-NN.txt are the record; the page itself is shot over CDP)
+  APP=io.metamask PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
+}
+mm_open() {   # $1 url: open it in MetaMask's in-app browser, forward its WebView devtools socket to 9222; 0 = found
+  local d="${1#https://}" s sock
+  note "metamask deep link metamask://dapp/$d"
+  adb shell am start -a android.intent.action.VIEW -d "'metamask://dapp/$d'" >/dev/null 2>&1 || true
+  sleep 30; adb exec-out screencap -p > shots/mm-dapp-1.png
+  APP=io.metamask PW=x WALK='["^got it$","^not now$","^close$","^ok$","^dismiss$"]' timeout 120 node scripts/ui-walk.mjs shots/mm-dapp 3 'straycucks' 2>&1 | tee -a shots/lab.log
+  sock=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ')
+  note "metamask webview devtools sockets: ${sock:-none}"
+  for s in $sock; do
+    adb forward --remove tcp:9222 2>/dev/null; adb forward tcp:9222 "localabstract:$s"
+    curl -s http://localhost:9222/json > "shots/mm-$s.json"
+    grep -q straycucks "shots/mm-$s.json" && return 0
+  done
+  return 1
+}
 for ph in ${PHASES:-chrome}; do
   note "=== phase $ph"
   case "$ph" in
@@ -65,13 +89,20 @@ for ph in ${PHASES:-chrome}; do
       adb shell cmd webviewupdate set-webview-implementation com.android.webview 2>&1 | tee -a shots/index.txt
       adb shell dumpsys webviewupdate | head -12 | tee -a shots/index.txt
       webview_shell webview ;;
+    xconnect)
+      # X connect from MetaMask's in-app browser with Chrome as the second browser (scripts/xconnect-lab.mjs).
+      # Chrome first: debug app (reads the no-first-run flags), one start so its first run is done before the handoff
+      adb shell am set-debug-app --persistent com.android.chrome || true
+      adb shell pm grant com.android.chrome android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+      adb shell am start -a android.intent.action.VIEW -d about:blank com.android.chrome >/dev/null 2>&1 || true
+      sleep 10; adb exec-out screencap -p > shots/xc-chrome-ready.png; adb shell am force-stop com.android.chrome
+      mm_setup
+      for u in "${LIST[@]}"; do
+        if mm_open "$u"; then timeout 2400 node scripts/xconnect-lab.mjs http://localhost:9222 shots xc "$u" 2>&1 | tee -a shots/lab.log || note "xconnect exit $?"
+        else note "xconnect: no straycucks page in MetaMask's browser"; adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml > shots/mm-dapp-ui.xml; fi
+      done ;;
     metamask)
-      adb install -r -g apks/metamask.apk 2>&1 | tail -1 | tee -a shots/index.txt
-      adb shell dumpsys package io.metamask | grep -m1 versionName | tee -a shots/index.txt
-      adb shell monkey -p io.metamask -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 20
-      # a throwaway wallet: random password made here, never printed or kept; MetaMask's screens are FLAG_SECURE, so
-      # adb screencaps of them come out black (the texts in mm-walk-NN.txt are the record; the page itself is shot over CDP)
-      APP=io.metamask PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
+      mm_setup
       for u in "${LIST[@]}"; do
         d="${u#https://}"
         note "metamask deep link metamask://dapp/$d"
