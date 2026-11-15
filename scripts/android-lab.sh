@@ -12,6 +12,8 @@ set -uo pipefail
 # orbit twice after the zoom-out so the computer faces the camera (from behind a tap finds nothing, runs 43657727010/715594)
 export DRAGS="${DRAGS:-2}"
 mkdir -p shots
+# host memory before, kernel OOM/qemu lines after: the emulator died mid-run twice on 2026-11-15 (runs 43726890096, 43727493568)
+{ free -m; nproc; } > shots/host.txt 2>&1
 read -ra LIST <<< "${URLS:-}"
 OS_URL="${OS_URL:-}"
 note() { echo "$*" | tee -a shots/index.txt; }
@@ -123,4 +125,5 @@ for ph in ${PHASES:-chrome}; do
       done ;;
   esac
 done
+{ echo "--- end"; free -m; sudo dmesg 2>/dev/null | grep -iE "oom|killed process|qemu|segfault" | tail -20; pgrep -a qemu-system | cut -c1-120; } >> shots/host.txt 2>&1
 exit 0
