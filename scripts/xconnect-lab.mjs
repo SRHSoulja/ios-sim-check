@@ -182,7 +182,9 @@ try {
     log('B-preswitch', B.preswitch);
   }
   B.tap = await mm.tapSel('#signin');
-  B.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
+  // signed in = the server says so (/me is the home view after sign-in; the wallet and X panels live on /me/settings, run 43685896402)
+  B.approve = await walletApprove(mm, `fetch('/api/w/me',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return j.signedIn===true},function(){return false})`, 150);
+  if (B.approve.ok) { B.homeShot = await mm.shot('B0-home-after-signin'); await mm.ev(`location.assign('/me/settings'), true`); await sleep(8000); await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden`, 30); }
   B.eth = await mm.ev('window.__ethlog');
   if (/must provide an Ethereum address/.test(String(B.approve.pageError || ''))) {
     // MetaMask 8.19: the page adds and switches to Robinhood Chain after Connect, then personal_sign finds no account
@@ -194,7 +196,7 @@ try {
     B.retry.perm = await mm.ev('window.__perm');
     await mm.ev(`(document.getElementById('out-st').textContent='', window.__ethlog=[], true)`);
     B.retry.tap = await mm.tapSel('#signin');
-    B.retry.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
+    B.retry.approve = await walletApprove(mm, `fetch('/api/w/me',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return j.signedIn===true},function(){return false})`, 150);
     B.retry.eth = await mm.ev('window.__ethlog');
     log('B-retry', { perm: B.retry.perm, ok: B.retry.approve.ok, err: B.retry.approve.pageError });
   }
@@ -262,7 +264,7 @@ try {
     adb('shell', 'monkey', '-p', 'io.metamask', '-c', 'android.intent.category.LAUNCHER', '1'); await sleep(10000);
     E.top = top();
     E.mmUrl = red(await mm.url());
-    if (!/\/me/.test(E.mmUrl) || /x-handoff/.test(E.mmUrl)) { E.note = 'wallet tab left /me; reopened'; await mm.ev(`location.assign(${JSON.stringify(URL0)}), true`); await sleep(10000); }
+    if (!/\/me\/settings/.test(E.mmUrl)) { E.note = 'wallet tab left /me/settings; reopened'; await mm.ev(`location.assign('/me/settings'), true`); await sleep(10000); }
     await sleep(8000);
     E.page = await mm.ev(VIS(['x-ho-link', 'x-ho-ready', 'x-ho-who', 'x-ho-st', 'x-st']));
     E.poll = await mm.ev(`fetch('/api/w/x/handoff',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return {state:j.state, handle:j.handle||null}})`);
