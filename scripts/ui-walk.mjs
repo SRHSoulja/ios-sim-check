@@ -12,7 +12,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // (order matters: the 'Create a new wallet' sheet keeps that button under 'Use Secret Recovery Phrase', and the first walk
 // tapped it again and landed on 'Continue with Google', run 43655798764)
 const WALK = (process.env.WALK ? JSON.parse(process.env.WALK) : [
-  '^use secret recovery phrase$', '^create (a )?new wallet$', '^i agree$', '^agree$', '^accept$', '^no thanks$', '^create password$',
+  '^i understand$', '^use secret recovery phrase$', '^create (a )?new wallet$', '^i agree$', '^agree$', '^accept$', '^no thanks$', '^create password$',
   '^remind me later$', '^skip$', '^skip account security', '^done$', '^open wallet$', '^got it$', '^not now$', '^maybe later$',
   '^continue$', '^confirm$', '^ok$', '^close$', '^next$', '^let.s go$', '^dismiss$', '^get started$',
 ]).map(s => new RegExp(s, 'i'));
