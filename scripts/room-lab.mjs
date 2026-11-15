@@ -4,6 +4,7 @@
 //   node room-lab.mjs <cdp base, e.g. http://localhost:9222> <out dir> <label> <url>
 // Env: TARGET_MATCH=<text> pick the page target whose url contains it (a wallet's in-app browser), HARNESS=1 open the url inside an OpenSea-style frame (sandbox="allow-scripts" + OpenSea's allow list, served by
 //      CDP Fetch on https://opensea-harness.test/), ADB=1 also take emulator screencaps (adb exec-out screencap -p),
+//      NOFACE=1 tap the computer as soon as it is on screen (even from behind), CPU=<n> CDP CPU throttling (n x slower),
 //      EMULATE=1 phone metrics on a desktop Chrome, NEWTAB=1 open a new target (desktop), READY_S (default 90) seconds.
 // Steps: load, feature probe (the engine's own three checks), open "+ Room menu", tap DIORAMA, close the menu, wait for
 // the Diorama, probe the live monitor (window.__hpc, needs #perf in the url), tap the computer's middle (from
@@ -69,6 +70,7 @@ if (EMU) {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 }
+if (process.env.CPU) { R.cpuThrottle = Number(process.env.CPU); await send('Emulation.setCPUThrottlingRate', { rate: R.cpuThrottle }); }
 if (HARNESS) await send('Fetch.enable', { patterns: [{ urlPattern: 'https://opensea-harness.test/*' }] });
 // the room's frame: the top page, or (HARNESS) the frame whose url is the room's
 const roomCtx = () => {
@@ -181,11 +183,13 @@ const COMP = `(()=>{const q=(window.__pois?window.__pois():[]).find(q=>q.id==='c
 // the opening phone frame may not show the computer: zoom out with pinches (as a visitor would), then orbit if needed
 R.find = [];
 let cm = comp && comp.m;
-for (let g = 0; g < 6 && !onScr(cm); g++) {
-  if (g < 3) await pinch(260, 60, vp[1] * 0.45); else await drag1(vp[0] * 0.3, vp[1] * 0.5, 120, 0);
+const facing = h => process.env.NOFACE === '1' || !h || h.hpc !== 'object' || h.front;   // the live screen (when there is one) must face the camera
+let pinches = 0;
+for (let g = 0; g < 14 && !(onScr(cm) && facing(hp)); g++) {
+  let gest = 'drag'; if (!onScr(cm) && pinches < 3) { pinches++; gest = 'pinch-out'; await pinch(260, 60, vp[1] * 0.45); } else await drag1(vp[0] * 0.25, vp[1] * 0.4, Number(process.env.DRAG_DX || 90), 0);
   for (let i = 0; i < 20; i++) { await sleep(800); if ((await evalIn(SC))?.frames) break; }
   await sleep(2500); cm = await evalIn(COMP); hp = await evalIn(HPC);
-  R.find.push({ g, gesture: g < 3 ? 'pinch-out' : 'drag', computer: cm, cam: await evalIn('window.__sc.cam()'), monitorW: hp && hp.front ? hp.onScreenW : null });
+  R.find.push({ g, gesture: gest, front: hp && hp.front, computer: cm, cam: await evalIn('window.__sc.cam()'), monitorW: hp && hp.front ? hp.onScreenW : null });
   log('find', R.find[R.find.length - 1]);
 }
 if (R.find.length) await shot('zoomed-out');

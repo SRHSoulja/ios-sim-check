@@ -36,7 +36,9 @@ jobs:
         run: |
           set -uo pipefail
           read -ra LIST <<< "$URLS"
-          xcrun simctl openurl "$UDID" "about:blank" || true; sleep 15
+          # warm Safari with a real page: about:blank is refused (-10814) and the first real openurl then timed out (error 60)
+          # three times in a row (run 43655805044)
+          for t in 1 2 3; do xcrun simctl openurl "$UDID" "https://straycucks.com/" && break; sleep 15; done; sleep 15
           SOCK=$(lsof -aUc launchd_sim 2>/dev/null | grep -o '/[^ ]*webinspectord_sim.socket' | head -1)
           [ -n "$SOCK" ] || SOCK=$(find /private/tmp -name 'com.apple.webinspectord_sim.socket' 2>/dev/null | head -1)
           echo "inspector socket: ${SOCK:-none}" | tee -a shots/index.txt
@@ -47,9 +49,9 @@ jobs:
             i=$((i+1)); echo "u$i $u" | tee -a shots/index.txt
             ok=0; for t in 1 2 3; do if xcrun simctl openurl "$UDID" "$u"; then ok=1; break; fi; sleep 10; done
             [ "$ok" = 1 ] || { echo "u$i FAILED to open" | tee -a shots/index.txt; continue; }
-            sleep 12
+            sleep 12   # (no `timeout` on macOS runners: perl alarm below)
             curl -s http://localhost:9222/json > "shots/u$i-pages.json" || true
-            timeout 900 node scripts/ios-room.mjs shots "ios-u$i" "$UDID" "straycucks.com" 2>&1 | tee -a shots/lab.log || echo "u$i ios-room exit $?" | tee -a shots/index.txt
+            perl -e 'alarm shift; exec @ARGV' 900 node scripts/ios-room.mjs shots "ios-u$i" "$UDID" "straycucks.com" 2>&1 | tee -a shots/lab.log || echo "u$i ios-room exit $?" | tee -a shots/index.txt
           done
       - uses: actions/upload-artifact@v4
         if: always()
