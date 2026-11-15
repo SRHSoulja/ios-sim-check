@@ -12,7 +12,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // (order matters: the 'Create a new wallet' sheet keeps that button under 'Use Secret Recovery Phrase', and the first walk
 // tapped it again and landed on 'Continue with Google', run 43655798764)
 const WALK = (process.env.WALK ? JSON.parse(process.env.WALK) : [
-  '^i understand$', '^use secret recovery phrase$', '^create (a )?new wallet$', '^i agree$', '^agree$', '^accept$', '^no thanks$', '^create password$',
+  '^unlock$', '^i understand$', '^use secret recovery phrase$', '^create (a )?new wallet$', '^i agree$', '^agree$', '^accept$', '^no thanks$', '^create password$',
   '^remind me later$', '^skip$', '^skip account security', '^done$', '^open wallet$', '^got it$', '^not now$', '^maybe later$',
   '^continue$', '^confirm$', '^ok$', '^close$', '^next$', '^let.s go$', '^dismiss$', '^get started$',
 ]).map(s => new RegExp(s, 'i'));
@@ -38,11 +38,14 @@ for (let i = 1; i <= Number(MAX); i++) {
   // money screens (MetaMask's first run offered "Buy MUSD $100 ... Continue" and the walk pressed Continue into Transak's
   // identity check, run 43661781877; nothing was bought, the wallet was empty): never press anything there, go Back
   // back on the launcher (Back on MetaMask's first-run "Buy MUSD" screen closes the app, run 43687789729): start it again
-  if (process.env.APP && pkg && /launcher/.test(pkg)) { adb('shell', 'monkey', '-p', process.env.APP, '-c', 'android.intent.category.LAUNCHER', '1'); note.push('on the launcher: started ' + process.env.APP + ' again'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(6000); continue; }
+  if (process.env.APP && pkg && /launcher/.test(pkg)) { adb('shell', 'am', 'force-stop', process.env.APP); typed.clear(); adb('shell', 'monkey', '-p', process.env.APP, '-c', 'android.intent.category.LAUNCHER', '1'); note.push('on the launcher: started ' + process.env.APP + ' again'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(6000); continue; }
   if (texts.some(t => /\b(buy|deposit|transak|debit or credit|verify your identity|swap tokens now|pay with)\b/i.test(t))) {
     // a way out that buys nothing first (Skip, Not now, Maybe later, Close), else Back
     const out = nodes.find(x => x.box && x.enabled !== 'false' && /^(skip|not now|maybe later|close|no thanks|cancel)$/i.test(x.label));
     if (out) { tap(out); note.push('money screen: tapped "' + out.label + '"'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2500); continue; }
+    // Back on MetaMask's first-run "Buy MUSD" screen closes the app, and a plain restart then hangs on the splash
+    // (run 43690980127): stop it and start it fresh (the wallet exists by then; it asks for the password: Unlock)
+    if (process.env.APP) { adb('shell', 'am', 'force-stop', process.env.APP); await sleep(1500); adb('shell', 'monkey', '-p', process.env.APP, '-c', 'android.intent.category.LAUNCHER', '1'); typed.clear(); note.push('money screen: stopped and restarted ' + process.env.APP); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(15000); continue; }
     adb('shell', 'input', 'keyevent', '4'); note.push('money screen: pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
   const sig = texts.join('|'); same = sig === lastSig ? same + 1 : 0; lastSig = sig;
   const did = [];
