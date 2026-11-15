@@ -210,8 +210,10 @@ try {
   B.tap = await mm.tapSel('#signin');
   // signed in = the server says so (/me is the home view after sign-in; the wallet and X panels live on /me/settings, run 43685896402)
   B.approve = await walletApprove(mm, `fetch('/api/w/me',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return j.signedIn===true},function(){return false})`, 150);
+  // read the request log BEFORE leaving /me: the move to /me/settings wipes window.__ethlog (run 43728890454 lost it)
+  B.ethBeforeNav = await mm.ev('window.__ethlog');
   if (B.approve.ok) { B.homeShot = await mm.shot('B0-home-after-signin'); await mm.ev(`location.assign('/me/settings'), true`); await sleep(8000); await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden`, 30); }
-  B.eth = await mm.ev('window.__ethlog');
+  B.eth = Array.isArray(B.ethBeforeNav) && B.ethBeforeNav.length ? B.ethBeforeNav : await mm.ev('window.__ethlog');
   // bug 1 fix check: the page's own chain add/switch comes before eth_requestAccounts; any -32602 and the retry are logged
   { const L = Array.isArray(B.eth) ? B.eth : []; const i = m => L.findIndex(e => e.m === m);
     const ch = [i('wallet_switchEthereumChain'), i('wallet_addEthereumChain')].filter(x => x >= 0);
