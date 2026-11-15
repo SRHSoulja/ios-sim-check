@@ -35,6 +35,9 @@ for (let i = 1; i <= Number(MAX); i++) {
   if (texts.some(t => stop.test(t))) { note.push('STOP matched'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ')); break; }
   // left the app (a Google sign-in, a browser): Back, never type into someone else's screen
   if (process.env.APP && pkg && pkg !== process.env.APP && !/launcher|systemui/.test(pkg)) { adb('shell', 'input', 'keyevent', '4'); note.push('left ' + process.env.APP + ': pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
+  // money screens (MetaMask's first run offered "Buy MUSD $100 ... Continue" and the walk pressed Continue into Transak's
+  // identity check, run 43661781877; nothing was bought, the wallet was empty): never press anything there, go Back
+  if (texts.some(t => /\b(buy|deposit|transak|debit or credit|verify your identity|swap tokens now|pay with)\b/i.test(t))) { adb('shell', 'input', 'keyevent', '4'); note.push('money screen: pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
   const sig = texts.join('|'); same = sig === lastSig ? same + 1 : 0; lastSig = sig;
   const did = [];
   // password fields first (empty ones), then unticked boxes, then the priority buttons

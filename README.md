@@ -28,3 +28,8 @@ Screenshots `NN.png` (after `wait` s) and `NN-b.png` (3 s later), plus `index.tx
     gh run download <run-id> -R SRHSoulja/ios-sim-check -n android-shots -D ./android-shots
 
 The emulator renders WebGL in software (swiftshader), so judge layout, errors and logic here, not GPU look.
+
+## android-lab.yml, ios-lab.yml (2026-11-14)
+Interactive room checks (menu, Diorama, pinch, orbit, tap the computer, close-up, OpenSea-style frame) in Android
+Chrome/Chromium/WebView/MetaMask and iOS Safari: scripts/room-lab.mjs, scripts/ios-room.mjs, scripts/ui-walk.mjs,
+scripts/android-lab.sh. Details: gmgn-brain brain/wiki/tools/android-emu-check.md.
