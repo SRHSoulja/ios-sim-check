@@ -13,6 +13,8 @@ on:
       api: { description: "Android API level (36 = Chrome 133; never 34 for canvas/WebGL)", required: false, default: "36" }
       chromium_rev: { description: "Chromium snapshot revision in AndroidDesktop_x64 (blank = LAST_CHANGE)", required: false, default: "" }
       metamask_tag: { description: "MetaMask mobile release tag, e.g. v8.19.0", required: false, default: "v8.19.0" }
+      holder: { description: "phase rel: a PUBLIC burner address for the page-side eth_accounts stub (blank = visitor only)", required: false, default: "" }
+      parts: { description: "phase rel: comma list of 2d,dio,3d,hidden,rm,holder,taxi (blank = all)", required: false, default: "" }
       mm_steps: { description: "max first-run steps for the MetaMask walk", required: false, default: "30" }
 permissions: { contents: read }
 jobs:
@@ -58,7 +60,7 @@ jobs:
         # inputs through env only; all logic in scripts/android-lab.sh (the action runs each script line in its own sh)
         timeout-minutes: 105
         uses: reactivecircus/android-emulator-runner@v2.38.0
-        env: { PHASES: "${{ inputs.phases }}", URLS: "${{ inputs.urls }}", OS_URL: "${{ inputs.os_url }}", MM_STEPS: "${{ inputs.mm_steps }}" }
+        env: { PHASES: "${{ inputs.phases }}", URLS: "${{ inputs.urls }}", OS_URL: "${{ inputs.os_url }}", MM_STEPS: "${{ inputs.mm_steps }}", HOLDER: "${{ inputs.holder }}", PARTS: "${{ inputs.parts }}" }
         with:
           api-level: ${{ inputs.api }}
           target: google_apis

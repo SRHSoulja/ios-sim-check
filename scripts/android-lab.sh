@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # android-lab.sh (2026-11-14): runs inside android-emulator-runner (emulator booted). Drives room pages with room-lab.mjs
 # in one or more Android browsers. Env (all from workflow inputs, through env only):
-#   PHASES  space list of: chrome (the image's own Chrome), chromium (apks/ChromePublic.apk, a Chromium snapshot),
+#   PHASES  space list of: rel (scripts/rel-lab.mjs, engine releases), chrome (the image's own Chrome), chromium (apks/ChromePublic.apk, a Chromium snapshot),
 #           webview (apks/SystemWebView.apk made the WebView provider + apks/SystemWebViewShell.apk as the browser),
 #           webview-stock (the shell on the image's own WebView), metamask (apks/metamask.apk, walked through first run
 #           with a throwaway wallet, the url opened in its in-app browser), xconnect (the X connect cases on a /me
 #           url inside MetaMask's browser, Chrome as the second browser: scripts/xconnect-lab.mjs)
 #   URLS    room page urls (each gets a room-lab run per browser)
+#   HOLDER  (phase rel) a PUBLIC burner address the page-side wallet stub answers eth_accounts with (no signing, ever)
 #   OS_URL  the NFT's animation_url, framed OpenSea-style (HARNESS=1) twice: as is + "#perf", and + "#pchtml&perf"
 set -uo pipefail
 # orbit twice after the zoom-out so the computer faces the camera (from behind a tap finds nothing, runs 43657727010/715594)
@@ -31,7 +32,17 @@ labs() {   # $1 label prefix; env passed through
     note "$p-os-pchtml $OS_URL#pchtml&perf (OpenSea-style frame)"; HARNESS=1 ADB=1 timeout 1500 node scripts/room-lab.mjs http://localhost:9222 shots "$p-os-pchtml" "$OS_URL#pchtml&perf" >> shots/lab.log 2>&1 || note "$p-os-pchtml exit $?"
   fi
 }
-chrome_like() {   # $1 package $2 label
+rels() {   # $1 label prefix: rel-lab.mjs per room url (chair from the url), then OS_URL as the real OpenSea item page and the harness
+  local p=$1 i=0 c
+  for u in "${LIST[@]}"; do i=$((i+1)); c=$(echo "$u" | grep -oE '/alive/[0-9]+' | grep -oE '[0-9]+$'); [ -n "$c" ] || { note "$p-u$i no chair in $u"; continue; }
+    note "$p-c$c $u"; PROTO=cdp HOLDER="${HOLDER:-}" PARTS="${PARTS:-}" timeout 1700 node scripts/rel-lab.mjs shots "$p-c$c" "$c" >> shots/lab.log 2>&1 || note "$p-c$c rel-lab exit $?"; done
+  if [ -n "$OS_URL" ]; then c=$(echo "$OS_URL" | grep -oE '[0-9]+$')
+    note "$p-os-real $OS_URL"; PROTO=cdp OS_ITEM="$OS_URL" timeout 600 node scripts/rel-lab.mjs shots "$p-os-real" "$c" >> shots/lab.log 2>&1 || note "$p-os-real exit $?"
+    note "$p-os-harness /alive/$c framed at $HURL"; PROTO=cdp HARNESS=1 timeout 600 node scripts/rel-lab.mjs shots "$p-os-harness" "$c" >> shots/lab.log 2>&1 || note "$p-os-harness exit $?"
+  fi
+}
+HURL=https://opensea.io/__device-lab-harness
+chrome_like() {   # $1 package $2 label [$3 runner: labs (default) or rels]
   adb shell am force-stop com.android.chrome; adb shell am force-stop org.chromium.chrome 2>/dev/null || true
   adb shell am set-debug-app --persistent "$1" || true
   adb shell pm grant "$1" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
@@ -39,7 +50,7 @@ chrome_like() {   # $1 package $2 label
   adb forward --remove-all; adb forward tcp:9222 localabstract:chrome_devtools_remote
   if ! wait_json; then note "$2: no devtools page"; adb exec-out screencap -p > "shots/$2-nodevtools.png"; return; fi
   curl -s http://localhost:9222/json/version > "shots/$2-version.json"; note "$2 $(grep -o '"Browser": *"[^"]*"' shots/$2-version.json)"
-  labs "$2"
+  "${3:-labs}" "$2"
 }
 webview_shell() {   # $1 label
   adb shell am force-stop org.chromium.webview_shell
@@ -81,6 +92,7 @@ for ph in ${PHASES:-chrome}; do
   note "=== phase $ph"
   case "$ph" in
     chrome) chrome_like com.android.chrome chrome ;;
+    rel) chrome_like com.android.chrome rel rels ;;   # engine releases v121-v123 (scripts/rel-lab.mjs), Chrome of the image
     chromium)
       adb install -r -g apks/ChromePublic.apk 2>&1 | tail -1 | tee -a shots/index.txt
       chrome_like org.chromium.chrome chromium ;;
