@@ -246,8 +246,14 @@ try {
     await mm.tapSel('#x-ho-copy'); await sleep(1500); D.copyStatus = await mm.ev(`document.getElementById('x-ho-st').innerText`);
     D.poll0 = await mm.ev(`fetch('/api/w/x/handoff',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return {state:j.state, ok:j.ok}})`);
     D.topBefore = top();
-    D.chromeTap = await mm.tapSel('#x-ho-chrome'); await sleep(8000);
+    D.chromeTap = await mm.tapSel('#x-ho-chrome'); await sleep(5000);
+    // MetaMask answers an intent link with its own dialog ("This website has been blocked from automatically opening an
+    // external application", IGNORE / ALLOW; it also freezes the page under it: run 43691594417). Record it, press ALLOW.
+    { const nodes = ui(); D.dialog = nodes.filter(n => n.label).map(n => n.label).slice(0, 10);
+      const allow = nodes.find(n => n.box && /^allow$/i.test(n.label));
+      if (allow) { adb('shell', 'input', 'tap', String(Math.round((allow.box[0] + allow.box[2]) / 2)), String(Math.round((allow.box[1] + allow.box[3]) / 2))); D.pressedAllow = true; await sleep(8000); } }
     D.topAfterTap = top();
+    writeFileSync(`${OUT}/${LABEL}-D1b-after-open-in-chrome-adb.png`, adb('exec-out', 'screencap', '-p'));
     D.openInChromeWorked = /com\.android\.chrome/.test(D.topAfterTap);
     D.mmAfterTapUrl = red(await mm.url());
     if (!D.openInChromeWorked && /^https:\/\/allowlist\.straycucks\.com\/me\/x-handoff\?c=/.test(String(hoUrl))) {
