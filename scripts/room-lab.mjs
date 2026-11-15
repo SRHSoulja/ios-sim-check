@@ -161,7 +161,7 @@ await shot('diorama');
 // ---- 3 frame times in the room view
 const FT = `new Promise(res=>{const d=[];let last=performance.now();const f0=(window.__sc||{}).frames||0;const T0=last;
   const step=t=>{d.push(t-last);last=t;if(t-T0<6000)requestAnimationFrame(step);else{d.sort((a,b)=>a-b);const q=p=>+d[Math.min(d.length-1,Math.floor(p*d.length))].toFixed(1);
-  res({n:d.length,fps:+(d.length/((t-T0)/1000)).toFixed(1),p50:q(0.5),p95:q(0.95),max:+d[d.length-1].toFixed(1),engineFrames:((window.__sc||{}).frames||0)-f0,perf:window.__perf?{calls:window.__perf.calls,tris:Math.round(window.__perf.tris||0)}:null})}};requestAnimationFrame(step)})`;
+  res({long100:d.filter(x=>x>100).length,n:d.length,fps:+(d.length/((t-T0)/1000)).toFixed(1),p50:q(0.5),p95:q(0.95),max:+d[d.length-1].toFixed(1),engineFrames:((window.__sc||{}).frames||0)-f0,perf:window.__perf?{calls:window.__perf.calls,tris:Math.round(window.__perf.tris||0)}:null})}};requestAnimationFrame(step)})`;
 const ftEval = async () => { const r = await send('Runtime.evaluate', { expression: FT, awaitPromise: true, returnByValue: true, ...(HARNESS && roomCtx() ? { contextId: roomCtx().id } : {}) }, HARNESS && roomCtx() ? roomCtx().sid || undefined : undefined, 30000); return r?.result?.value ?? r; };
 R.framesRoom = await ftEval(); log('framesRoom', R.framesRoom);
 
@@ -239,6 +239,11 @@ if (at) {
     }
   } else if (res && res.startsWith('item-card')) {
     // the card's "Open Computer" button: the Computer panel (portal sheet) must open
+    R.cardFit = await evalIn(`(()=>{const c=document.querySelector('[data-sc=item-sheet]'),b=[...c.querySelectorAll('button, a')].find(b=>/open computer/i.test(b.textContent));const r=c.getBoundingClientRect(),q=b&&b.getBoundingClientRect();
+      let sc=null;for(let e=b;e&&e!==document.body;e=e.parentElement){const cs=getComputedStyle(e);if(/(auto|scroll)/.test(cs.overflowY)&&e.scrollHeight>e.clientHeight+2){sc={tag:e.tagName,sc:e.dataset.sc||'',scrollH:e.scrollHeight,clientH:e.clientHeight};break}}
+      return {card:[r.top,r.bottom].map(Math.round),button:q?[q.top,q.bottom].map(Math.round):null,viewportH:innerHeight,buttonInView:!!q&&q.bottom<=innerHeight&&q.top>=0,scroller:sc}})()`);
+    log('cardFit', R.cardFit);
+    if (R.cardFit && !R.cardFit.buttonInView) { await evalIn(`[...document.querySelectorAll('[data-sc=item-sheet] button, [data-sc=item-sheet] a')].find(b=>/open computer/i.test(b.textContent))?.scrollIntoView({block:'center'})`); await sleep(800); await shot('card-scrolled'); }
     const ob = await evalIn(`(()=>{const b=[...document.querySelectorAll('[data-sc=item-sheet] button, [data-sc=item-sheet] a')].find(b=>/open computer/i.test(b.textContent));if(!b)return null;const r=b.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()`);
     if (Array.isArray(ob)) {
       await tap(ob[0], ob[1]); let sh = null; for (let i = 0; i < 20; i++) { await sleep(600); sh = (await evalIn(SC))?.sheet; if (sh) break; }
