@@ -67,13 +67,15 @@ for ph in ${PHASES:-chrome}; do
       adb install -r -g apks/metamask.apk 2>&1 | tail -1 | tee -a shots/index.txt
       adb shell dumpsys package io.metamask | grep -m1 versionName | tee -a shots/index.txt
       adb shell monkey -p io.metamask -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 20
-      PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
+      # a throwaway wallet: random password made here, never printed or kept; MetaMask's screens are FLAG_SECURE, so
+      # adb screencaps of them come out black (the texts in mm-walk-NN.txt are the record; the page itself is shot over CDP)
+      APP=io.metamask PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
       for u in "${LIST[@]}"; do
         d="${u#https://}"
         note "metamask deep link metamask://dapp/$d"
         adb shell am start -a android.intent.action.VIEW -d "'metamask://dapp/$d'" >/dev/null 2>&1 || true
         sleep 30; adb exec-out screencap -p > shots/mm-dapp-1.png
-        PW=x WALK='["^got it$","^not now$","^close$","^ok$","^continue$","^dismiss$"]' timeout 300 node scripts/ui-walk.mjs shots/mm-dapp 4 '^diorama$|room menu' 2>&1 | tee -a shots/lab.log
+        APP=io.metamask PW=x WALK='["^got it$","^not now$","^close$","^ok$","^continue$","^dismiss$"]' timeout 300 node scripts/ui-walk.mjs shots/mm-dapp 4 '^diorama$|room menu' 2>&1 | tee -a shots/lab.log
         sock=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ')
         note "metamask webview devtools sockets: ${sock:-none}"
         for s in $sock; do

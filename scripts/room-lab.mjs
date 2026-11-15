@@ -111,6 +111,8 @@ const tap = async (x, y) => {
   return [Math.round(X), Math.round(Y)];
 };
 const rectOf = sel => evalIn(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return null;const r=e.getBoundingClientRect(),cs=getComputedStyle(e);return {x:r.x,y:r.y,w:r.width,h:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2,display:cs.display,vis:cs.visibility,op:cs.opacity,text:(e.textContent||'').trim().slice(0,40),font:cs.fontSize,shown:r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden'&&+cs.opacity>0.05}})()`);
+// the item card a tap on a placed thing opens (itemOpen: <dialog data-sc=item-sheet>, e.g. 'Computer ... Open Computer')
+const ITEM = `(()=>{const e=document.querySelector('[data-sc=item-sheet]');return e&&e.open!==false&&e.getBoundingClientRect().height>0?(e.innerText||'').replace(/\\s+/g,' ').slice(0,120):null})()`;
 const SC = `(()=>{const s=window.__sc;if(!s)return null;return {frames:s.frames,mode:s.mode,sheet:s.sheet,screen:s.screen}})()`;
 const HPC = `(()=>{const s=window.__hpc;if(!s)return {hpc:typeof s,el:!!document.getElementById('sc-pchtml')};const z=s.z||{};
   const P=(x,y)=>{const e=s.M.elements,X=e[0]*x+e[4]*y+e[12],Y=e[1]*x+e[5]*y+e[13],W=e[3]*x+e[7]*y+e[15];return [X/W,Y/W]};
@@ -188,8 +190,11 @@ R.find = [];
 let cm = comp && comp.m;
 const facing = h => process.env.NOFACE === '1' || !h || h.hpc !== 'object' || h.front;   // the live screen (when there is one) must face the camera
 let pinches = 0;
-for (let g = 0; g < 14 && !(onScr(cm) && facing(hp)); g++) {
-  let gest = 'drag'; if (!onScr(cm) && pinches < 3) { pinches++; gest = 'pinch-out'; await pinch(260, 60, vp[1] * 0.45); } else await drag1(vp[0] * 0.25, vp[1] * 0.4, Number(process.env.DRAG_DX || 90), 0);
+// DRAGS=n: at least n orbit drags once on screen (the same turn the live screen needed to face the camera; for pages
+// with no live screen there is nothing to read the facing from)
+let drags = 0; const minDrags = Number(process.env.DRAGS || 0);
+for (let g = 0; g < 14 && !(onScr(cm) && facing(hp) && drags >= minDrags); g++) {
+  let gest = 'drag'; if (!onScr(cm) && pinches < 3) { pinches++; gest = 'pinch-out'; await pinch(260, 60, vp[1] * 0.45); } else { drags++; await drag1(vp[0] * 0.25, vp[1] * 0.4, Number(process.env.DRAG_DX || 90), 0); }
   for (let i = 0; i < 20; i++) { await sleep(800); if ((await evalIn(SC))?.frames) break; }
   await sleep(2500); cm = await evalIn(COMP); hp = await evalIn(HPC);
   R.find.push({ g, gesture: gest, front: hp && hp.front, computer: cm, cam: await evalIn('window.__sc.cam()'), monitorW: hp && hp.front ? hp.onScreenW : null });
@@ -208,10 +213,11 @@ if (at) {
   for (let i = 0; i < 60; i++) {
     await sleep(700); hp = await evalIn(HPC, 8000); sc = await evalIn(SC, 8000);
     if (sc && sc.sheet) { res = 'sheet:' + sc.sheet; break; }
+    const card = await evalIn(ITEM, 8000); if (card && typeof card === 'string') { res = 'item-card:' + card; break; }
     if (hp && hp.z && hp.z.on && hp.z.k === 1 && hp.live) { res = 'closeup'; break; }
   }
   R.tapResult = res || 'nothing'; log('tapResult', { res: R.tapResult, sc, hpc: hp });
-  await sleep(1500); await shot(res === 'closeup' ? 'closeup' : res ? 'sheet' : 'after-tap');
+  await sleep(1500); await shot(res === 'closeup' ? 'closeup' : res ? res.split(':')[0] : 'after-tap');
   if (res === 'closeup') {
     R.framesCloseup = await ftEval(); log('framesCloseup', R.framesCloseup);
     R.closeupUi = {
@@ -231,6 +237,14 @@ if (at) {
       R.backResult = { hpc: hp, back: await rectOf('[data-sc=pc-back]') }; log('back', R.backResult);
       await sleep(1000); await shot('back-in-room');
     }
+  } else if (res && res.startsWith('item-card')) {
+    // the card's "Open Computer" button: the Computer panel (portal sheet) must open
+    const ob = await evalIn(`(()=>{const b=[...document.querySelectorAll('[data-sc=item-sheet] button, [data-sc=item-sheet] a')].find(b=>/open computer/i.test(b.textContent));if(!b)return null;const r=b.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()`);
+    if (Array.isArray(ob)) {
+      await tap(ob[0], ob[1]); let sh = null; for (let i = 0; i < 20; i++) { await sleep(600); sh = (await evalIn(SC))?.sheet; if (sh) break; }
+      R.openComputer = { sheet: sh || null, text: await evalIn(`(()=>{const s=document.querySelector('[data-obj]');return s?(s.innerText||'').replace(/\\s+/g,' ').slice(0,200):null})()`) };
+      log('openComputer', R.openComputer); await sleep(1500); await shot('computer-panel');
+    } else log('openComputer', 'no Open Computer button in the card');
   } else if (res && res.startsWith('sheet')) {
     R.sheetText = await evalIn(`(()=>{const s=document.querySelector('.on[data-obj]')||document.querySelector('[data-obj]');return s?(s.innerText||'').slice(0,400):null})()`);
     log('sheetText', R.sheetText);

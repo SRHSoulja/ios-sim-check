@@ -2,17 +2,19 @@
 // text matches a priority list, ticking unticked checkboxes and typing a password into empty password fields.
 // Every step saves <prefix>-NN.png (adb screencap) and <prefix>-NN.txt (the visible texts and what was tapped).
 //   node ui-walk.mjs <prefix> <max steps> <stop regex>
-// Env: PW (password for password fields; the workflow makes a random one per run, never stored), WALK (JSON array of
+// Env: APP (package: if another app comes up, press Back), PW (password for password fields; the workflow makes a random one per run, never stored), WALK (JSON array of
 // regex strings, the tap priority list; default: wallet onboarding words).
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 const [PREFIX, MAX = '30', STOP = '^$'] = process.argv.slice(2);
 const adb = (...a) => execFileSync('adb', a, { maxBuffer: 64e6, timeout: 30000 });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// (order matters: the 'Create a new wallet' sheet keeps that button under 'Use Secret Recovery Phrase', and the first walk
+// tapped it again and landed on 'Continue with Google', run 43655798764)
 const WALK = (process.env.WALK ? JSON.parse(process.env.WALK) : [
-  '^get started$', '^create (a )?new wallet$', '^create wallet$', 'secret recovery phrase', '^i agree$', '^agree$', '^accept$',
-  '^no thanks$', '^create password$', '^remind me later$', '^skip$', '^skip account security', '^done$', '^got it$', '^not now$',
-  '^maybe later$', '^continue$', '^confirm$', '^ok$', '^close$', '^next$', '^open wallet$', '^let.s go$', '^dismiss$',
+  '^use secret recovery phrase$', '^create (a )?new wallet$', '^i agree$', '^agree$', '^accept$', '^no thanks$', '^create password$',
+  '^remind me later$', '^skip$', '^skip account security', '^done$', '^open wallet$', '^got it$', '^not now$', '^maybe later$',
+  '^continue$', '^confirm$', '^ok$', '^close$', '^next$', '^let.s go$', '^dismiss$', '^get started$',
 ]).map(s => new RegExp(s, 'i'));
 const stop = new RegExp(STOP, 'i');
 const parse = xml => [...xml.matchAll(/<node ([^>]*?)\/?>/g)].map(m => {
@@ -31,6 +33,8 @@ for (let i = 1; i <= Number(MAX); i++) {
   const pkg = nodes[0] && nodes[0].package;
   const note = [`step ${n} package=${pkg}`, 'texts: ' + JSON.stringify(texts.slice(0, 60))];
   if (texts.some(t => stop.test(t))) { note.push('STOP matched'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ')); break; }
+  // left the app (a Google sign-in, a browser): Back, never type into someone else's screen
+  if (process.env.APP && pkg && pkg !== process.env.APP && !/launcher|systemui/.test(pkg)) { adb('shell', 'input', 'keyevent', '4'); note.push('left ' + process.env.APP + ': pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
   const sig = texts.join('|'); same = sig === lastSig ? same + 1 : 0; lastSig = sig;
   const did = [];
   // password fields first (empty ones), then unticked boxes, then the priority buttons

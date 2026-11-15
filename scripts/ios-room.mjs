@@ -70,8 +70,8 @@ for (let g = 0; g < 3 && !on(cm); g++) { await ev(PINCH); await sleep(4000); cm 
 if (on(cm)) {
   shot('zoomed-out');
   R.tapEl = await ev(TAP(cm[0], cm[1])); log('tap', { at: cm, el: R.tapEl });
-  let res = null; for (let i = 0; i < 30; i++) { await sleep(700); sc = await ev(SC); const z = await ev('window.__hpc&&window.__hpc.z?window.__hpc.z.on:null'); if (sc && sc.sheet) { res = 'sheet:' + sc.sheet; break; } if (z) { res = 'closeup'; break; } }
-  R.tapResult = res || 'nothing'; log('tapResult', R.tapResult); await sleep(1500); shot(res ? res.replace(':', '-') : 'after-tap');
+  let res = null; for (let i = 0; i < 30; i++) { await sleep(700); sc = await ev(SC); const z = await ev('window.__hpc&&window.__hpc.z?window.__hpc.z.on:null'); if (sc && sc.sheet) { res = 'sheet:' + sc.sheet; break; } const card = await ev(`(()=>{const e=document.querySelector('[data-sc=item-sheet]');return e&&e.getBoundingClientRect().height>0?(e.innerText||'').replace(/\\s+/g,' ').slice(0,120):null})()`); if (card && typeof card === 'string') { res = 'item-card:' + card; break; } if (z) { res = 'closeup'; break; } }
+  R.tapResult = res || 'nothing'; log('tapResult', R.tapResult); await sleep(1500); shot(res ? res.split(':')[0] : 'after-tap');
   R.sheetText = await ev(`(()=>{const s=document.querySelector('[data-obj]');return s?(s.innerText||'').slice(0,300):null})()`); log('sheetText', R.sheetText);
 } else log('computerOffScreen', cm);
 log('done', { console: R.console.length });
