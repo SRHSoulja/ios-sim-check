@@ -62,7 +62,7 @@ for ph in ${PHASES:-chrome}; do
     webview)
       adb install -r -g apks/SystemWebView.apk 2>&1 | tail -1 | tee -a shots/index.txt
       adb install -r -g apks/SystemWebViewShell.apk 2>&1 | tail -1 | tee -a shots/index.txt
-      adb shell cmd webview set-webview-implementation com.android.webview 2>&1 | tee -a shots/index.txt
+      adb shell cmd webviewupdate set-webview-implementation com.android.webview 2>&1 | tee -a shots/index.txt
       adb shell dumpsys webviewupdate | head -12 | tee -a shots/index.txt
       webview_shell webview ;;
     metamask)
