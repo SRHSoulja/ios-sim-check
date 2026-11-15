@@ -23,7 +23,7 @@ const parse = xml => [...xml.matchAll(/<node ([^>]*?)\/?>/g)].map(m => {
 });
 const centre = n => [Math.round((n.box[0] + n.box[2]) / 2), Math.round((n.box[1] + n.box[3]) / 2)];
 const tap = n => { const [x, y] = centre(n); adb('shell', 'input', 'tap', String(x), String(y)); return [x, y]; };
-let lastSig = '', same = 0;
+let lastSig = '', same = 0; const typed = new Set();
 for (let i = 1; i <= Number(MAX); i++) {
   const n = String(i).padStart(2, '0');
   let nodes = [];
@@ -38,8 +38,10 @@ for (let i = 1; i <= Number(MAX); i++) {
   const sig = texts.join('|'); same = sig === lastSig ? same + 1 : 0; lastSig = sig;
   const did = [];
   // password fields first (empty ones), then unticked boxes, then the priority buttons
-  for (const f of nodes.filter(x => x.password === 'true' && x.box && x.enabled !== 'false')) {
-    if ((f.text || '').length) continue;
+  // password fields: password="true", or (MetaMask's React Native fields expose no password flag, run 43657732643) an
+  // EditText whose text is its hint ("New password", "Re-enter new password"); each box typed once
+  for (const f of nodes.filter(x => x.box && x.enabled !== 'false' && (x.password === 'true' || (/EditText/.test(x.class || '') && /password/i.test((x.text || '') + ' ' + (x.hint || '') + ' ' + (x['resource-id'] || '')))))) {
+    const key = f.box.join(','); if (typed.has(key)) continue; typed.add(key);
     tap(f); await sleep(400); adb('shell', 'input', 'text', process.env.PW || 'Throwaway-' + Date.now()); did.push('typed password'); await sleep(400);
   }
   if (did.length) { try { adb('shell', 'input', 'keyevent', '111'); } catch (e) { /* no keyboard */ } }

@@ -74,11 +74,21 @@ await sleep(7500); R.framesRoom = await ev('window.__ft'); log('framesRoom', R.f
 let cm = await ev(COMP); R.find = [];
 const on = m => m && m[0] > 4 && m[1] > 4 && m[0] < (R.probe.iw || 390) - 4 && m[1] < (R.probe.ih || 700) - 60;
 for (let g = 0; g < 3 && !on(cm); g++) { await ev(PINCH); await sleep(4000); cm = await ev(COMP); R.find.push({ g, computer: cm }); log('find', { g, computer: cm }); }
+// two orbit drags (90 px each, as on Android and the VE) so the computer faces the camera: from behind a tap finds nothing
+const DRAG = `(async()=>{const c=[...document.querySelectorAll('canvas')].filter(c=>getComputedStyle(c).display!=='none').sort((a,b)=>b.width*b.height-a.width*a.height)[0];const r=c.getBoundingClientRect(),x0=r.left+r.width*0.25,y=r.top+r.height*0.4;
+  const P=(x,t,b)=>c.dispatchEvent(new PointerEvent(t,{bubbles:true,cancelable:true,clientX:x,clientY:y,pointerId:21,pointerType:'touch',isPrimary:true,buttons:b,button:0}));
+  P(x0,'pointerdown',1);for(let i=1;i<=12;i++){P(x0+90*i/12,'pointermove',1);await new Promise(r=>setTimeout(r,40))}P(x0+90,'pointerup',0);return 'ok'})()`;
+for (let k = 0; k < Number(process.env.DRAGS || 2) && on(cm); k++) { await ev(DRAG); await sleep(3000); cm = await ev(COMP); R.find.push({ drag: k + 1, computer: cm, cam: await ev('window.__sc.cam()') }); log('drag', R.find[R.find.length - 1]); }
+for (let i = 0; i < 10; i++) { await sleep(1200); const c2 = await ev(COMP); const still = Array.isArray(c2) && Array.isArray(cm) && Math.abs(c2[0] - cm[0]) < 2 && Math.abs(c2[1] - cm[1]) < 2; cm = c2; if (still) break; }
 if (on(cm)) {
   shot('zoomed-out');
   R.tapEl = await ev(TAP(cm[0], cm[1])); log('tap', { at: cm, el: R.tapEl });
   let res = null; for (let i = 0; i < 30; i++) { await sleep(700); sc = await ev(SC); const z = await ev('window.__hpc&&window.__hpc.z?window.__hpc.z.on:null'); if (sc && sc.sheet) { res = 'sheet:' + sc.sheet; break; } const card = await ev(`(()=>{const e=document.querySelector('[data-sc=item-sheet]');return e&&e.getBoundingClientRect().height>0?(e.innerText||'').replace(/\\s+/g,' ').slice(0,120):null})()`); if (card && typeof card === 'string') { res = 'item-card:' + card; break; } if (z) { res = 'closeup'; break; } }
   R.tapResult = res || 'nothing'; log('tapResult', R.tapResult); await sleep(1500); shot(res ? res.split(':')[0] : 'after-tap');
+  if (R.tapResult.startsWith('item-card')) {
+    log('openComputer', await ev(`(()=>{const b=[...document.querySelectorAll('[data-sc=item-sheet] button, [data-sc=item-sheet] a')].find(b=>/open computer/i.test(b.textContent));if(!b)return 'no button';b.scrollIntoView({block:'center'});b.click();return 'clicked'})()`));
+    await sleep(2500); R.openComputerSheet = (await ev(SC))?.sheet || null; log('openComputerSheet', R.openComputerSheet); shot('computer-panel');
+  }
   R.sheetText = await ev(`(()=>{const s=document.querySelector('[data-obj]');return s?(s.innerText||'').slice(0,300):null})()`); log('sheetText', R.sheetText);
 } else log('computerOffScreen', cm);
 log('done', { console: R.console.length });

@@ -8,6 +8,8 @@
 #   URLS    room page urls (each gets a room-lab run per browser)
 #   OS_URL  the NFT's animation_url, framed OpenSea-style (HARNESS=1) twice: as is + "#perf", and + "#pchtml&perf"
 set -uo pipefail
+# orbit twice after the zoom-out so the computer faces the camera (from behind a tap finds nothing, runs 43657727010/715594)
+export DRAGS="${DRAGS:-2}"
 mkdir -p shots
 read -ra LIST <<< "${URLS:-}"
 OS_URL="${OS_URL:-}"

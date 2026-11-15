@@ -196,7 +196,11 @@ let drags = 0; const minDrags = Number(process.env.DRAGS || 0);
 for (let g = 0; g < 14 && !(onScr(cm) && facing(hp) && drags >= minDrags); g++) {
   let gest = 'drag'; if (!onScr(cm) && pinches < 3) { pinches++; gest = 'pinch-out'; await pinch(260, 60, vp[1] * 0.45); } else { drags++; await drag1(vp[0] * 0.25, vp[1] * 0.4, Number(process.env.DRAG_DX || 90), 0); }
   for (let i = 0; i < 20; i++) { await sleep(800); if ((await evalIn(SC))?.frames) break; }
-  await sleep(2500); cm = await evalIn(COMP); hp = await evalIn(HPC);
+  // settle: on a slow software GPU the camera eases for many seconds after a gesture (Chromium in the emulator ran
+  // 1.6 fps and tapped where the monitor had been, run 43657715594): wait until the computer stops moving
+  await sleep(2500); cm = await evalIn(COMP);
+  for (let i = 0; i < 20; i++) { await sleep(1500); const c2 = await evalIn(COMP); const still = Array.isArray(c2) && Array.isArray(cm) && Math.abs(c2[0] - cm[0]) < 2 && Math.abs(c2[1] - cm[1]) < 2; cm = c2; if (still) break; }
+  hp = await evalIn(HPC);
   R.find.push({ g, gesture: gest, front: hp && hp.front, computer: cm, cam: await evalIn('window.__sc.cam()'), monitorW: hp && hp.front ? hp.onScreenW : null });
   log('find', R.find[R.find.length - 1]);
 }
