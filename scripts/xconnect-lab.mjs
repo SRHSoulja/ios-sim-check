@@ -67,9 +67,22 @@ async function cdp(base, match, tag) {
   };
   return { send, ev, shot, tapSel, url: () => ev('location.href'), close: () => ws.close() };
 }
+// the wallet browser tab that answers (after Chrome, MetaMask's old tab stopped answering CDP: run 43688457227)
+async function cdpLive(base, match, tag) {
+  let all = [];
+  try { all = (await (await fetch(base + '/json', { signal: AbortSignal.timeout(5000) })).json()).filter(x => x.type === 'page' && x.url.includes(match)); } catch (e) { return null; }
+  R[tag + 'LiveTargets'] = all.map(x => red(x.url));
+  for (const t of all) {
+    const c = await cdp(base, t.url, tag); if (!c) continue;
+    const v = await c.ev('document.visibilityState', 5000);
+    if (v === 'visible') return c;
+    c.close();
+  }
+  return null;
+}
 // what the visitor can read: the visible text of the given ids, and whether each is shown
 const VIS = ids => `(function(){var o={};${JSON.stringify(ids)}.forEach(function(i){var e=document.getElementById(i); if(!e){o[i]=null;return;} var r=e.getBoundingClientRect(); o[i]={shown:!!(e.offsetParent||e.getClientRects().length)&&!e.closest('[hidden]'),text:(e.innerText||e.value||'').replace(/\\s+/g,' ').trim().slice(0,400),w:Math.round(r.width),h:Math.round(r.height)}}); return o})()`;
-const BUTTONS = sel => `(function(){var b=document.querySelector(${JSON.stringify(sel)}); if(!b) return null; return [].slice.call(b.querySelectorAll('button,a.btn,input')).map(function(x){return {tag:x.tagName,text:(x.innerText||x.value||'').trim(),href:x.href?String(x.href).replace(/([?&]c=[A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/,'$1...'):undefined, w:Math.round(x.getBoundingClientRect().width), h:Math.round(x.getBoundingClientRect().height)}})})()`;
+const BUTTONS = sel => `(function(){var b=document.querySelector(${JSON.stringify(sel)}); if(!b) return null; return [].slice.call(b.querySelectorAll('button,a.btn,input')).map(function(x){return {tag:x.tagName,text:(x.innerText||x.value||'').trim().replace(/([?&]c=[A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/,'$1...'),href:x.href?String(x.href).replace(/([?&]c=[A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/,'$1...'):undefined, w:Math.round(x.getBoundingClientRect().width), h:Math.round(x.getBoundingClientRect().height)}})})()`;
 const ui = () => {
   adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml');
   const xml = adb('shell', 'cat', '/sdcard/ui.xml').toString();
@@ -139,7 +152,7 @@ async function synthTrip(c, kind, tag) {
 async function waitFor(c, expr, maxS = 30) { for (let i = 0; i < maxS; i++) { const v = await c.ev(expr); if (v === true) return true; await sleep(1000); } return false; }
 
 // ---------------- run ----------------
-const mm = await cdp(BASE, 'straycucks.com', 'mm');
+let mm = await cdp(BASE, 'straycucks.com', 'mm');
 if (!mm) { R.fatal = 'no straycucks page in the wallet browser'; save(); process.exit(1); }
 try {
   R.ua = await mm.ev('navigator.userAgent');
@@ -263,17 +276,30 @@ try {
     const E = R.cases.E = {};
     adb('shell', 'monkey', '-p', 'io.metamask', '-c', 'android.intent.category.LAUNCHER', '1'); await sleep(10000);
     E.top = top();
+    E.oldTab = await mm.ev('document.visibilityState', 6000);
+    if (E.oldTab !== 'visible') {
+      // as the Chrome page says: "Open the Stray Cucks page in your wallet app again"
+      E.note = 'old tab not answering (' + JSON.stringify(E.oldTab) + '); reopened by metamask://dapp link';
+      try { mm.close(); } catch (e) {}
+      adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', "'metamask://dapp/allowlist.straycucks.com/me/settings'"); await sleep(25000);
+      E.ui = ui().filter(n => n.label).map(n => n.label).slice(0, 12);
+      mm = (await cdpLive(BASE, 'straycucks.com', 'mm')) || mm;
+      await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden`, 30);
+    }
     E.mmUrl = red(await mm.url());
-    if (!/\/me\/settings/.test(E.mmUrl)) { E.note = 'wallet tab left /me/settings; reopened'; await mm.ev(`location.assign('/me/settings'), true`); await sleep(10000); }
-    await sleep(8000);
-    E.page = await mm.ev(VIS(['x-ho-link', 'x-ho-ready', 'x-ho-who', 'x-ho-st', 'x-st']));
+    await sleep(6000);
+    E.page = await mm.ev(VIS(['x-ho', 'x-ho-link', 'x-ho-ready', 'x-ho-who', 'x-ho-st', 'x-st']));
     E.poll = await mm.ev(`fetch('/api/w/x/handoff',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return {state:j.state, handle:j.handle||null}})`);
     E.shot = await mm.shot('E1-wallet-tab-after-chrome', '#x-ho');
-    E.pass = E.poll?.state === 'started' && /Waiting for you to sign in with X/.test(E.page?.['x-ho-st']?.text || '');
-    log('E', { pass: E.pass, poll: E.poll });
-    // ---- F: abandoned: the link runs out
+    E.pass = ['waiting', 'started'].includes(E.poll?.state) && !E.page?.['x-ho-ready']?.shown;
+    log('E', { pass: E.pass, poll: E.poll, note: E.note });
+    // ---- F: abandoned: a link nobody finishes runs out (a fresh link, this tab kept open in front)
     if (process.env.SKIP_EXPIRY !== '1') {
       const F = R.cases.F = {};
+      await mm.ev(`(function(){var c=document.getElementById('x-consent'); if(c&&!c.checked) c.click(); return true})()`);
+      F.make = await mm.tapSel('#x-ho-make'); await sleep(4000);
+      F.made = await mm.ev(VIS(['x-ho-link', 'x-ho-st']));
+      if (F.made?.['x-ho-link']) F.made['x-ho-link'].text = red(F.made['x-ho-link'].text);
       const t0 = Date.now();
       while (Date.now() - t0 < 12 * 60e3) { await sleep(20000); const s = await mm.ev(`document.getElementById('x-ho-st').innerText`); if (/ran out/.test(String(s))) break; }
       F.waitedS = Math.round((Date.now() - t0) / 1000);
