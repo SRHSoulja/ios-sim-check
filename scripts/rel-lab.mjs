@@ -31,10 +31,14 @@ mkdirSync(OUT, { recursive: true });
 const R = { label: LABEL, proto: PROTO, chair: CHAIR, holder: HOLDER || null, steps: [], console: [], exceptions: [], shots: [] };
 const save = () => writeFileSync(`${OUT}/${LABEL}.json`, JSON.stringify(R, null, 2));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clip = t => { t = String(t || ''); return t.length > 520 ? t.slice(0, 120) + ' ... ' + t.slice(-400) : t; };
 const log = (k, v) => { R.steps.push({ k, v }); save(); console.log(LABEL, k, JSON.stringify(v ?? null).slice(0, 500)); };
 const adb = (...a) => { try { return execFileSync('adb', a, { timeout: 30000 }).toString(); } catch (e) { return 'ERR ' + e.message.slice(0, 120); } };
 
 // ---------------------------------------------------------------- transport
+// WebKit drops a session's overrides and bootstrap script when the socket closes (run 43750276866: reduce stayed false),
+// so attach() sends them again on every new socket
+let PREF = null, BOOT = null;
 let ws = null, id = 0, target = null, tgUrl = ''; const pending = new Map(); const ctxs = []; const frames = new Map();
 const HURL = 'https://opensea.io/__device-lab-harness';
 const HARNESS_HTML = src => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenSea-style player</title><style>body{margin:0;background:#121212;color:#ddd;font:14px system-ui}iframe{display:block;width:100vw;height:100vw;border:0;background:#000}p{padding:8px 12px}</style></head><body><iframe id="f" sandbox="allow-scripts" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" src="${src.replace(/"/g, '&quot;')}"></iframe><p>OpenSea-style frame</p><div style="height:2600px">more of the page</div></body></html>`;
@@ -48,16 +52,16 @@ const onMsg = ev => {
   if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result ?? { error: m.error }); pending.delete(m.id); return; }
   const p = m.params || {}, sid = m.sessionId || '';
   switch (m.method) {
-    case 'Console.messageAdded': { const c = p.message; if (c.level === 'error' || c.level === 'warning') R.console.push({ level: c.level, text: (c.text || '').slice(0, 300), url: c.url || '' }); break; }
-    case 'Runtime.consoleAPICalled': if (p.type === 'error' || p.type === 'warning') R.console.push({ level: p.type, text: (p.args || []).map(a => a.value ?? a.description ?? a.type).join(' ').slice(0, 300), url: p.stackTrace?.callFrames?.[0]?.url || '' }); break;
+    case 'Console.messageAdded': { const c = p.message; if (c.level === 'error' || c.level === 'warning') R.console.push({ level: c.level, text: clip(c.text), url: c.url || '' }); break; }
+    case 'Runtime.consoleAPICalled': if (p.type === 'error' || p.type === 'warning') R.console.push({ level: p.type, text: clip((p.args || []).map(a => a.value ?? a.description ?? a.type).join(' ')), url: p.stackTrace?.callFrames?.[0]?.url || '' }); break;
     case 'Runtime.exceptionThrown': R.exceptions.push({ text: p.exceptionDetails?.text, desc: (p.exceptionDetails?.exception?.description || '').slice(0, 300), url: p.exceptionDetails?.url || '' }); break;
-    case 'Log.entryAdded': if (p.entry.level === 'error') R.console.push({ level: 'log-' + p.entry.source, text: (p.entry.text || '').slice(0, 300), url: p.entry.url || '' }); break;
+    case 'Log.entryAdded': if (p.entry.level === 'error') R.console.push({ level: 'log-' + p.entry.source, text: clip(p.entry.text), url: p.entry.url || '' }); break;
     case 'Runtime.executionContextCreated': ctxs.push({ sid, id: p.context.id, frameId: p.context.auxData?.frameId, isDefault: p.context.auxData?.isDefault, origin: p.context.origin }); break;
     case 'Runtime.executionContextsCleared': for (let i = ctxs.length - 1; i >= 0; i--) if (ctxs[i].sid === sid) ctxs.splice(i, 1); break;
     case 'Page.frameNavigated': frames.set(p.frame.id, p.frame.url); break;
     case 'Target.attachedToTarget': { const s = p.sessionId; send('Runtime.enable', {}, s); send('Page.enable', {}, s); send('Page.getFrameTree', {}, s).then(ft => { if (ft?.frameTree) frames.set(ft.frameTree.frame.id, ft.frameTree.frame.url); }); send('Runtime.runIfWaitingForDebugger', {}, s); break; }
     case 'Fetch.requestPaused':
-      if (p.request.url.startsWith(HURL)) send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body: Buffer.from(HARNESS_HTML(`${BASE}/alive/${CHAIR}#perf`)).toString('base64') });
+      if (p.request.url.startsWith(HURL)) send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body: Buffer.from(HARNESS_HTML(`${BASE}/alive/${CHAIR}#${process.env.HHASH || 'perf'}`)).toString('base64') });
       else send('Fetch.continueRequest', { requestId: p.requestId });
       break;
   }
@@ -78,7 +82,7 @@ const attach = async match => {
   ws = new WebSocket(pg.webSocketDebuggerUrl);
   await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; setTimeout(() => bad(new Error('ws timeout')), 10000); });
   ws.onmessage = onMsg; await sleep(1500);
-  if (PROTO === 'wk') { await send('Console.enable'); await send('Runtime.enable'); }
+  if (PROTO === 'wk') { await send('Console.enable'); await send('Runtime.enable'); if (PREF) R.motionOverride = await send('Page.overrideUserPreference', { name: 'PrefersReducedMotion', value: PREF }); if (BOOT) await send('Page.setBootstrapScript', { source: BOOT }); }
   else { for (const d of ['Runtime', 'Page', 'Log']) await send(d + '.enable'); await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }); }
 };
 const frameCtx = () => { const hit = ctxs.filter(c => c.isDefault && /straycucks\.com\/alive\//.test(frames.get(c.frameId) || '')); return hit[hit.length - 1] || null; };
@@ -116,7 +120,8 @@ const tap = async sel => {
   return { tapped: true, sel, at: b2.map(Math.round), size: box.slice(2).map(Math.round) };
 };
 const nav = async url => {
-  if (PROTO === 'cdp') { await send('Page.navigate', { url }); await sleep(3000); return; }
+  await ev('(()=>{try{sessionStorage.clear()}catch(e){}return 1})()');
+  if (PROTO === 'cdp') { await send('Page.navigate', { url: 'about:blank' }); await sleep(1200); await send('Page.navigate', { url }); await sleep(3000); return; }
   await ev(`(()=>{location.href=${JSON.stringify(url)};return 1})()`); await sleep(2500);
   if (url.includes('#')) await ev('(()=>{location.reload();return 1})()').catch(() => {});
   await sleep(8000); await attach(/\/alive\//);
@@ -134,7 +139,7 @@ const ready = async (want, s = 60) => { let sc = null; for (let i = 0; i < s; i+
 const tvWait = async (s = 60) => { let t = null; for (let i = 0; i < s; i++) { t = await ev(TV); if (t?.tv && (t.tv.drawn || t.tv.ch === 'cats')) break; await sleep(1000); } return t; };
 const STUB = A => `(()=>{const A=${JSON.stringify([A])};const eth={isMetaMask:true,on(){},removeListener(){},async request({method}){if(method==='eth_accounts')return A;if(method==='eth_chainId')return '0x1237';const e=new Error('device lab stub: asks for nothing');e.code=4001;throw e}};try{Object.defineProperty(window,'ethereum',{value:eth,configurable:true})}catch(e){window.ethereum=eth}return !!window.EvmWallet&&window.EvmWallet.list().length})()`;
 const watchTv = async () => { const a = await tap('.scf'); await sleep(900); const b = await tap('[data-sc=watch-tv]'); await sleep(9000); return { menu: a, watch: b }; };
-const motion = async v => { if (PROTO === 'cdp') { R.motionVia = 'adb settings animator_duration_scale'; for (const k of ['animator_duration_scale', 'transition_animation_scale', 'window_animation_scale']) adb('shell', 'settings', 'put', 'global', k, v ? '1' : '0'); } else { R.motionVia = 'WebKit Page.overrideUserPreference'; R.motionOverride = await send('Page.overrideUserPreference', { name: 'PrefersReducedMotion', value: v ? 'NoPreference' : 'Reduce' }); } };
+const motion = async v => { if (PROTO === 'cdp') { R.motionVia = 'adb settings animator_duration_scale'; for (const k of ['animator_duration_scale', 'transition_animation_scale', 'window_animation_scale']) adb('shell', 'settings', 'put', 'global', k, v ? '1' : '0'); } else { R.motionVia = 'WebKit Page.overrideUserPreference'; PREF = v ? null : 'Reduce'; R.motionOverride = await send('Page.overrideUserPreference', v ? { name: 'PrefersReducedMotion' } : { name: 'PrefersReducedMotion', value: 'Reduce' }); } };
 
 // ---------------------------------------------------------------- the real OpenSea item page / the harness frame
 if (OS_ITEM || HARNESS) {
@@ -202,8 +207,10 @@ if (PARTS.includes('holder')) {
   const vis = await ev(`(()=>{const c=document.querySelector('[data-sc=room-space]');return {card:!!c,shown:!!c&&!c.hidden&&c.getBoundingClientRect().height>0}})()`);
   log('visitorCard', vis); await shot('visitor-editor');
   if (HOLDER) {
+    const boot = PROTO === 'cdp' ? await send('Page.addScriptToEvaluateOnNewDocument', { source: STUB(HOLDER) }) : await send('Page.setBootstrapScript', { source: (BOOT = STUB(HOLDER)) });
+    R.stubBoot = boot;
     await nav(U('', '2d&perf')); await ready('2d');
-    const listed = await ev(STUB(HOLDER)); await sleep(500);
+    const listed = await ev(`(()=>({eth:!!window.ethereum,list:window.EvmWallet?window.EvmWallet.list().length:null}))()`); await sleep(500);
     await ev(`window.__sc&&window.__sc.edit('room')`); await sleep(3000);
     const card = await ev(`(()=>{const c=document.querySelector('[data-sc=room-space]');if(!c)return {card:false};c.scrollIntoView({block:'start'});const h=[...document.querySelectorAll('h3')].find(x=>x.textContent==='Add to your room');const s=c.querySelector('svg');const r=s&&s.getBoundingClientRect();
       return {card:true,shown:!c.hidden&&c.getBoundingClientRect().height>0,firstUnderHeading:!!h&&h.nextElementSibling===c,title:(c.querySelector('h3')||{}).textContent||null,
@@ -225,6 +232,7 @@ if (PARTS.includes('holder')) {
     }
   }
 }
+if (R.stubBoot) { if (PROTO === 'cdp') await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: R.stubBoot.identifier }); else { BOOT = null; await send('Page.setBootstrapScript', {}); } }
 if (PARTS.includes('taxi')) {
   await nav(U('?room=toy2d:1', '2d&perf')); const sc = await ready('2d'); await sleep(2500);
   log('taxiPreview', { sc, data: await ev(DATA), href: await ev('location.href') }); await shot('taxi-2d');
