@@ -53,6 +53,9 @@ for (let i = 1; i <= Number(MAX); i++) {
   // password fields: password="true", or (MetaMask's React Native fields expose no password flag, run 43657732643) an
   // EditText whose text is its hint ("New password", "Re-enter new password"); each box typed once
   for (const f of nodes.filter(x => x.box && x.enabled !== 'false' && (x.password === 'true' || (/EditText/.test(x.class || '') && /password/i.test((x.text || '') + ' ' + (x.hint || '') + ' ' + (x['resource-id'] || '')))))) {
+    // a box that already shows masked text is done: the keyboard moves the box, so its bounds alone typed the single
+    // Unlock field twice (run 43728027858: "Incorrect password" after the Buy MUSD restart)
+    if (/^[\u2022*]+$/.test((f.text || '').trim())) continue;
     const key = f.box.join(','); if (typed.has(key)) continue; typed.add(key);
     tap(f); await sleep(400); adb('shell', 'input', 'text', process.env.PW || 'Throwaway-' + Date.now()); did.push('typed password'); await sleep(400);
   }
