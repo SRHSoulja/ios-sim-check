@@ -37,7 +37,13 @@ for (let i = 1; i <= Number(MAX); i++) {
   if (process.env.APP && pkg && pkg !== process.env.APP && !/launcher|systemui/.test(pkg)) { adb('shell', 'input', 'keyevent', '4'); note.push('left ' + process.env.APP + ': pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
   // money screens (MetaMask's first run offered "Buy MUSD $100 ... Continue" and the walk pressed Continue into Transak's
   // identity check, run 43661781877; nothing was bought, the wallet was empty): never press anything there, go Back
-  if (texts.some(t => /\b(buy|deposit|transak|debit or credit|verify your identity|swap tokens now|pay with)\b/i.test(t))) { adb('shell', 'input', 'keyevent', '4'); note.push('money screen: pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
+  // back on the launcher (Back on MetaMask's first-run "Buy MUSD" screen closes the app, run 43687789729): start it again
+  if (process.env.APP && pkg && /launcher/.test(pkg)) { adb('shell', 'monkey', '-p', process.env.APP, '-c', 'android.intent.category.LAUNCHER', '1'); note.push('on the launcher: started ' + process.env.APP + ' again'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(6000); continue; }
+  if (texts.some(t => /\b(buy|deposit|transak|debit or credit|verify your identity|swap tokens now|pay with)\b/i.test(t))) {
+    // a way out that buys nothing first (Skip, Not now, Maybe later, Close), else Back
+    const out = nodes.find(x => x.box && x.enabled !== 'false' && /^(skip|not now|maybe later|close|no thanks|cancel)$/i.test(x.label));
+    if (out) { tap(out); note.push('money screen: tapped "' + out.label + '"'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2500); continue; }
+    adb('shell', 'input', 'keyevent', '4'); note.push('money screen: pressed Back'); writeFileSync(`${PREFIX}-${n}.txt`, note.join('\n')); console.log(note.join(' | ').slice(0, 600)); await sleep(2000); continue; }
   const sig = texts.join('|'); same = sig === lastSig ? same + 1 : 0; lastSig = sig;
   const did = [];
   // password fields first (empty ones), then unticked boxes, then the priority buttons
