@@ -3,7 +3,7 @@
 // Target.sendMessageToTarget since iOS 12.2. Screens with `xcrun simctl io <udid> screenshot`. Taps are SYNTHETIC
 // pointer events dispatched in the page (WebKit's inspector has no Input domain on iOS): they test the engine's logic
 // in WebKit, not iOS touch handling; label results that way.
-//   node ios-room.mjs <out dir> <label> <udid> <url substring to pick the page>
+//   node ios-room.mjs <out dir> <label> <udid> <room url (loaded and reloaded in the /alive/ tab)>
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const [OUT, LABEL, UDID, MATCH] = process.argv.slice(2);
@@ -12,23 +12,25 @@ const R = { label: LABEL, steps: [], console: [], shots: [], synthetic: true };
 const save = () => writeFileSync(`${OUT}/${LABEL}.json`, JSON.stringify(R, null, 2));
 const log = (k, v) => { R.steps.push({ k, v }); save(); console.log(LABEL, k, JSON.stringify(v ?? null).slice(0, 400)); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let pages = [];
-for (let t = 0; t < 30; t++) {
-  try { pages = await (await fetch('http://localhost:9222/json', { signal: AbortSignal.timeout(4000) })).json(); } catch (e) { R.listErr = String(e); }
-  if (pages.some(p => (p.url || '').includes(MATCH))) break; await sleep(2000);
-}
-R.pages = pages.map(p => p.url); const pg = pages.find(p => (p.url || '').includes(MATCH)) || pages[0];
-if (!pg) { R.fatal = 'no page from iwdp'; save(); process.exit(1); }
-const ws = new WebSocket(pg.webSocketDebuggerUrl);
-await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; setTimeout(() => bad(new Error('ws timeout')), 10000); });
-let id = 0, target = null; const pending = new Map();
-ws.onmessage = ev => {
-  const m = JSON.parse(ev.data);
-  if (m.method === 'Target.targetCreated' && m.params.targetInfo.type === 'page') { target = m.params.targetInfo.targetId; return; }
-  if (m.method === 'Target.dispatchMessageFromTarget') { const x = JSON.parse(m.params.message); if (x.id && pending.has(x.id)) { pending.get(x.id)(x); pending.delete(x.id); } else if (x.method === 'Console.messageAdded') { const c = x.params.message; if (c.level === 'error' || c.level === 'warning') R.console.push({ level: c.level, text: (c.text || '').slice(0, 300) }); } return; }
-  if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+// MATCH is the room url itself. Safari keeps the warm-up tab and may take a hash-only openurl as a same-page jump
+// (run 43656486913 read the warm-up homepage and the old hash), so: attach to the /alive/ tab, load MATCH there, reload,
+// then attach again
+let pages = [], pg = null, ws = null, id = 0, target = null; const pending = new Map();
+const list = async () => { try { pages = await (await fetch('http://localhost:9222/json', { signal: AbortSignal.timeout(4000) })).json(); } catch (e) { R.listErr = String(e); pages = []; } return pages; };
+const attach = async () => {
+  for (let t = 0; t < 30; t++) { await list(); pg = pages.filter(p => /\/alive\//.test(p.url || '')).pop(); if (pg) break; await sleep(2000); }
+  R.pages = pages.map(p => p.url); if (!pg) { R.fatal = 'no /alive/ page from iwdp'; save(); process.exit(1); }
+  target = null; ws = new WebSocket(pg.webSocketDebuggerUrl);
+  await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; setTimeout(() => bad(new Error('ws timeout')), 10000); });
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.method === 'Target.targetCreated' && m.params.targetInfo.type === 'page') { target = m.params.targetInfo.targetId; return; }
+    if (m.method === 'Target.dispatchMessageFromTarget') { const x = JSON.parse(m.params.message); if (x.id && pending.has(x.id)) { pending.get(x.id)(x); pending.delete(x.id); } else if (x.method === 'Console.messageAdded') { const c = x.params.message; if (c.level === 'error' || c.level === 'warning') R.console.push({ level: c.level, text: (c.text || '').slice(0, 300) }); } return; }
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+  };
+  await sleep(1500);
 };
-await sleep(1500);
+await attach();
 R.wrapped = !!target;
 const send = (method, params = {}, ms = 15000) => new Promise(r => {
   const i = ++id, t = setTimeout(() => { pending.delete(i); r({ timeout: method }); }, ms); pending.set(i, v => { clearTimeout(t); r(v); });
@@ -48,6 +50,11 @@ const PINCH = `(async()=>{const c=[...document.querySelectorAll('canvas')].filte
   P(11,cx-30,cy,'pointerup',0);P(12,cx+30,cy,'pointerup',0);return 'ok'})()`;
 const SC = `(()=>{const s=window.__sc;return s?{frames:s.frames,mode:s.mode,sheet:s.sheet}:null})()`;
 const COMP = `(()=>{const q=(window.__pois?window.__pois():[]).find(q=>q.id==='computer');if(!q)return null;const m=window.__roomItems.project({x:q.c[0],y:q.c[1],d:q.c[2]});return m&&m.map(Math.round)})()`;
+R.loadedFrom = await ev('location.href');
+await ev(`(()=>{const u=${JSON.stringify(MATCH)};if(location.href!==u)location.href=u;setTimeout(()=>location.reload(),300);return 1})()`);
+try { ws.close(); } catch (e) { /* fine */ }
+await sleep(9000); await attach(); await send('Console.enable'); await send('Runtime.enable');
+R.href = await ev('location.href'); log('href', R.href);
 let sc = null; for (let i = 0; i < 60; i++) { sc = await ev(SC); if (sc && sc.frames > 5) break; await sleep(1000); }
 log('ready', sc);
 R.probe = await ev(`(()=>{const c=document.createElement('canvas');c.setAttribute('content','drawable');const W1=window.WebGLRenderingContext&&WebGLRenderingContext.prototype,W2=window.WebGL2RenderingContext&&WebGL2RenderingContext.prototype;
