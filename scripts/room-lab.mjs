@@ -3,7 +3,7 @@
 // (EMULATE=1: 390x844 DPR 2 touch, e.g. the VE's Chrome over ve-tunnel.sh). Node 22 (global WebSocket, fetch).
 //   node room-lab.mjs <cdp base, e.g. http://localhost:9222> <out dir> <label> <url>
 // Env: TARGET_MATCH=<text> pick the page target whose url contains it (a wallet's in-app browser), HARNESS=1 open the url inside an OpenSea-style frame (sandbox="allow-scripts" + OpenSea's allow list, served by
-//      CDP Fetch on https://opensea-harness.test/), ADB=1 also take emulator screencaps (adb exec-out screencap -p),
+//      CDP Fetch at https://opensea.io/__device-lab-harness, never sent: /alive allows only opensea.io as a framer), ADB=1 also take emulator screencaps (adb exec-out screencap -p),
 //      NOFACE=1 tap the computer as soon as it is on screen (even from behind), CPU=<n> CDP CPU throttling (n x slower),
 //      EMULATE=1 phone metrics on a desktop Chrome, NEWTAB=1 open a new target (desktop), READY_S (default 90) seconds.
 // Steps: load, feature probe (the engine's own three checks), open "+ Room menu", tap DIORAMA, close the menu, wait for
@@ -22,6 +22,9 @@ const R = { label: LABEL, url: URL0, harness: HARNESS, emulate: EMU, steps: [], 
 const save = () => writeFileSync(`${OUT}/${LABEL}.json`, JSON.stringify(R, null, 2));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = (k, v) => { R.steps.push({ k, v }); save(); console.log(LABEL, k, JSON.stringify(v ?? null).slice(0, 400)); };
+// the harness is served at an opensea.io address (CDP Fetch answers it; nothing is sent to OpenSea): /alive/<id> allows
+// only frame-ancestors 'self' https://opensea.io https://*.opensea.io, so any other host shows Chrome's error page
+const HURL = 'https://opensea.io/__device-lab-harness';
 const HARNESS_HTML = src => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OpenSea-style player</title><style>body{margin:0;background:#121212;color:#ddd;font:14px system-ui}iframe{display:block;width:100vw;height:100vw;border:0;background:#000}p{padding:8px 12px}</style></head>
 <body><iframe id="f" sandbox="allow-scripts" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" src="${src.replace(/"/g, '&quot;')}"></iframe>
@@ -59,7 +62,7 @@ ws.onmessage = async ev => {
       send('Runtime.enable', {}, s); send('Page.enable', {}, s); send('Page.getFrameTree', {}, s).then(ft => { if (ft?.frameTree) frames.set(ft.frameTree.frame.id, ft.frameTree.frame.url); });
       send('Runtime.runIfWaitingForDebugger', {}, s); break; }
     case 'Fetch.requestPaused':
-      if (/^https:\/\/opensea-harness\.test\//.test(p.request.url)) send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body: Buffer.from(HARNESS_HTML(URL0)).toString('base64') });
+      if (p.request.url.startsWith(HURL)) send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body: Buffer.from(HARNESS_HTML(URL0)).toString('base64') });
       else send('Fetch.continueRequest', { requestId: p.requestId });
       break;
   }
@@ -71,7 +74,7 @@ if (EMU) {
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 }
 if (process.env.CPU) { R.cpuThrottle = Number(process.env.CPU); await send('Emulation.setCPUThrottlingRate', { rate: R.cpuThrottle }); }
-if (HARNESS) await send('Fetch.enable', { patterns: [{ urlPattern: 'https://opensea-harness.test/*' }] });
+if (HARNESS) await send('Fetch.enable', { patterns: [{ urlPattern: HURL + '*' }] });
 // the room's frame: the top page, or (HARNESS) the frame whose url is the room's
 const roomCtx = () => {
   if (!HARNESS) return null;
@@ -117,7 +120,7 @@ const HPC = `(()=>{const s=window.__hpc;if(!s)return {hpc:typeof s,el:!!document
 
 // ---- 1 load
 const t0 = Date.now();
-await send('Page.navigate', { url: HARNESS ? 'https://opensea-harness.test/' : URL0 });
+await send('Page.navigate', { url: HARNESS ? HURL : URL0 });
 let sc = null;
 for (let i = 0; i < READY_S; i++) { await sleep(1000); sc = await evalIn(SC, 8000); if (sc && sc.frames > 5) break; }
 log('ready', { sc, secs: Math.round((Date.now() - t0) / 1000) });
