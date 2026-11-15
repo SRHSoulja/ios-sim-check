@@ -12,7 +12,10 @@
 //  F abandoned: wait for the link to run out (10 min): "That link ran out" must show.
 //  G clean-up: delete the throwaway account (owner session).
 // The handoff code is a one-time 10-minute secret: only its first 6 characters are written to the json.
-// Env: CHROME_PORT (default 9223), SKIP_EXPIRY=1 skips F.
+// Env: CHROME_PORT (default 9223), SKIP_EXPIRY=1 skips F, PRESWITCH=1 turns the old Robinhood Chain pre-step back on.
+// 2026-11-15 (sc-world acdd8db19 live): no pre-step by default (the page now adds/switches the chain before
+// eth_requestAccounts); in MetaMask (UA MetaMaskMobile) Open in Chrome must be hidden and the paste line shown;
+// Copy link is checked by pasting into Chrome's address bar; the wallet tab is reloaded while a link waits (sc_xho).
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const [BASE, OUT, LABEL, URL0] = process.argv.slice(2);
@@ -185,7 +188,7 @@ try {
     A.afterBackUrl = red(await mm.url());
     A.shotBack = await mm.shot('A4-after-back', '#out-st');
   }
-  A.pass = !!(A.page?.['x-inapp']?.shown && /do(es)? not work inside wallet apps/i.test(A.page['x-inapp'].text) && A.inappButtons?.some(b => /Copy link/.test(b.text)) && A.inappButtons?.some(b => /Open in Chrome/.test(b.text)) && /did not finish/i.test(A.afterBack?.['out-st']?.text || ''));
+  A.pass = !!(A.page?.['x-inapp']?.shown && /do(es)? not work inside wallet apps/i.test(A.page['x-inapp'].text) && A.inappButtons?.some(b => /Copy link/.test(b.text)) && !A.inappButtons?.some(b => /Open in Chrome/.test(b.text)) && /Tap Copy link, then paste it in Chrome or Safari\./.test(A.page['x-inapp'].text) && /did not finish/i.test(A.afterBack?.['out-st']?.text || ''));
   log('A', { pass: A.pass });
   // ---- B: wallet sign-in
   const B = R.cases.B = {};
@@ -194,11 +197,11 @@ try {
   await mm.ev(`(function(){var a=document.getElementById('age'); if(a&&!a.checked){a.click()} return true})()`);
   // every wallet request the page makes, with its answer or error (run 43683584888: personal_sign failed "must provide an Ethereum address")
   B.hook = await mm.ev(`(function(){window.__ethlog=[];function wrap(p,n){if(!p||p.__w)return;p.__w=1;var o=p.request.bind(p);p.request=function(a){var e={n:n,m:a&&a.method,p:JSON.stringify(a&&a.params||null).slice(0,200)};window.__ethlog.push(e);return o(a).then(function(r){e.r=JSON.stringify(r).slice(0,200);return r},function(x){e.err=String(x&&x.message)+' code='+(x&&x.code);throw x})}}wrap(window.ethereum,'window.ethereum');window.addEventListener('eip6963:announceProvider',function(ev){wrap(ev.detail.provider,(ev.detail.info&&ev.detail.info.name)||'6963')});window.dispatchEvent(new Event('eip6963:requestProvider'));return true})()`);
-  // Lab pre-step (PRESWITCH=1, default on): MetaMask 8.19 grants a site its account per network, and the page's switch to
+  // Lab pre-step (PRESWITCH=1 only; default OFF since 2026-11-15, the page itself now switches first): MetaMask 8.19 grants a site its account per network, and the page's switch to
   // Robinhood Chain AFTER Connect leaves personal_sign with no permitted account ("must provide an Ethereum address",
   // runs 43684498482, 43685238444). Adding and switching to chain 4663 BEFORE Connect lets the sign-in through, so the
   // X cases can run; it also tests that order as the fix.
-  if (process.env.PRESWITCH !== '0') {
+  if (process.env.PRESWITCH === '1') {
     await mm.ev(`(window.__sw='pending', window.ethereum.request({method:'wallet_addEthereumChain',params:[{chainId:'0x1237',chainName:'Robinhood Chain',nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},rpcUrls:['https://rpc.mainnet.chain.robinhood.com'],blockExplorerUrls:['https://robinhoodchain.blockscout.com']}]}).then(function(r){window.__sw='ok '+JSON.stringify(r)},function(e){window.__sw='ERR '+e.message}), true)`);
     B.preswitchApprove = await walletApprove(mm, `window.__sw!=='pending'`, 60);
     B.preswitch = { result: await mm.ev('window.__sw'), chain: await mm.ev(`window.ethereum.request({method:'eth_chainId'})`) };
@@ -209,6 +212,14 @@ try {
   B.approve = await walletApprove(mm, `fetch('/api/w/me',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return j.signedIn===true},function(){return false})`, 150);
   if (B.approve.ok) { B.homeShot = await mm.shot('B0-home-after-signin'); await mm.ev(`location.assign('/me/settings'), true`); await sleep(8000); await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden`, 30); }
   B.eth = await mm.ev('window.__ethlog');
+  // bug 1 fix check: the page's own chain add/switch comes before eth_requestAccounts; any -32602 and the retry are logged
+  { const L = Array.isArray(B.eth) ? B.eth : []; const i = m => L.findIndex(e => e.m === m);
+    const ch = [i('wallet_switchEthereumChain'), i('wallet_addEthereumChain')].filter(x => x >= 0);
+    B.order = { methods: L.map(e => e.m + (e.err ? ' ERR ' + e.err : '')), firstChain: ch.length ? Math.min(...ch) : -1, firstReq: i('eth_requestAccounts'),
+      e32602: L.filter(e => /code=-32602/.test(e.err || '')).length, signs: L.filter(e => e.m === 'personal_sign').length, signOk: L.some(e => e.m === 'personal_sign' && e.r) };
+    B.order.chainFirst = B.order.firstChain >= 0 && B.order.firstReq > B.order.firstChain;
+    B.chainNow = await mm.ev(`window.ethereum.request({method:'eth_chainId'})`);
+    log('B-order', B.order); }
   if (/must provide an Ethereum address/.test(String(B.approve.pageError || ''))) {
     // MetaMask 8.19: the page adds and switches to Robinhood Chain after Connect, then personal_sign finds no account
     // permitted for that chain (CAIP-25 scope, RPCMethodMiddleware checkActiveAccountAndChainId). Probe: ask for the
@@ -255,19 +266,51 @@ try {
     D.shotLink = await mm.shot('D1-handoff-link', '#x-ho-link');
     await mm.tapSel('#x-ho-copy'); await sleep(1500); D.copyStatus = await mm.ev(`document.getElementById('x-ho-st').innerText`);
     D.poll0 = await mm.ev(`fetch('/api/w/x/handoff',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return {state:j.state, ok:j.ok}})`);
+    // the clipboard really holds the link: paste it (Android KEYCODE_PASTE) into a scratch box on this page, compare in-page
+    await mm.ev(`(function(){var t=document.createElement('textarea'); t.id='__pb'; t.style.cssText='position:fixed;top:40%;left:5%;width:90%;height:60px;z-index:99999'; document.body.appendChild(t); return true})()`);
+    await mm.tapSel('#__pb'); await sleep(800); adb('shell', 'input', 'keyevent', '279'); await sleep(1500);
+    D.clipboardMatches = await mm.ev(`(function(){var t=document.getElementById('__pb'); var v=t?t.value:''; var same=!!v && v===document.getElementById('x-ho-url').value; if(t) t.remove(); return {same:same, len:v.length}})()`);
+    adb('shell', 'input', 'keyevent', '111');
+    D.chromeHidden = await mm.ev(`(function(){var e=document.getElementById('x-ho-chrome'); return !e || e.hidden || !e.getClientRects().length})()`);
+    D.pasteLine = await mm.ev(VIS(['x-ho-paste']));
+    // bug 3: reload this tab while the link waits: the same link must show again (this tab's sessionStorage sc_xho)
+    D.reload = {};
+    D.reload.saved = await mm.ev(`!!sessionStorage.getItem('sc_xho')`);
+    await mm.ev(`(sessionStorage.setItem('__lab_was', document.getElementById('x-ho-url').value), location.reload(), true)`); await sleep(8000);
+    await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden && !document.getElementById('x-ho-link').hidden`, 30);
+    D.reload.page = await mm.ev(VIS(['x-ho', 'x-ho-link', 'x-ho-paste', 'x-ho-st']));
+    if (D.reload.page?.['x-ho-link']) D.reload.page['x-ho-link'].text = red(D.reload.page['x-ho-link'].text);
+    D.reload.sameLink = await mm.ev(`(function(){var w=sessionStorage.getItem('__lab_was'); sessionStorage.removeItem('__lab_was'); return !!w && document.getElementById('x-ho-url').value===w})()`);
+    D.reload.chromeHidden = await mm.ev(`(function(){var e=document.getElementById('x-ho-chrome'); return !e || e.hidden || !e.getClientRects().length})()`);
+    D.reload.shot = await mm.shot('D1c-after-reload-link-again', '#x-ho-link');
+    log('D-reload', D.reload);
     D.topBefore = top();
-    D.chromeTap = await mm.tapSel('#x-ho-chrome'); await sleep(5000);
-    // MetaMask answers an intent link with its own dialog ("This website has been blocked from automatically opening an
-    // external application", IGNORE / ALLOW; it also freezes the page under it: run 43691594417). Record it, press ALLOW.
-    { const nodes = ui(); D.dialog = nodes.filter(n => n.label).map(n => n.label).slice(0, 10);
+    if (!D.chromeHidden) {
+      // Open in Chrome is still offered (it must not be in MetaMask): tap it as before and record what MetaMask does
+      D.chromeTap = await mm.tapSel('#x-ho-chrome'); await sleep(5000);
+      const nodes = ui(); D.dialog = nodes.filter(n => n.label).map(n => n.label).slice(0, 10);
       const allow = nodes.find(n => n.box && /^allow$/i.test(n.label));
-      if (allow) { adb('shell', 'input', 'tap', String(Math.round((allow.box[0] + allow.box[2]) / 2)), String(Math.round((allow.box[1] + allow.box[3]) / 2))); D.pressedAllow = true; await sleep(8000); } }
-    D.topAfterTap = top();
-    writeFileSync(`${OUT}/${LABEL}-D1b-after-open-in-chrome-adb.png`, adb('exec-out', 'screencap', '-p'));
-    D.openInChromeWorked = /com\.android\.chrome/.test(D.topAfterTap);
+      if (allow) { adb('shell', 'input', 'tap', String(Math.round((allow.box[0] + allow.box[2]) / 2)), String(Math.round((allow.box[1] + allow.box[3]) / 2))); D.pressedAllow = true; await sleep(8000); }
+      D.topAfterTap = top(); D.openInChromeWorked = /com\.android\.chrome/.test(D.topAfterTap);
+    }
+    // the paste path: Chrome, tap its address bar, paste (KEYCODE_PASTE), Enter; the run's copy is what lands there
+    if (!D.openInChromeWorked) {
+      adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', 'about:blank', 'com.android.chrome'); await sleep(6000);
+      const bar = () => ui().find(n => n.box && /:id\/(url_bar|search_box_text)$/.test(n['resource-id'] || ''));
+      let b1 = bar(); D.paste = { barFound: !!b1 };
+      if (b1) {
+        adb('shell', 'input', 'tap', String(Math.round((b1.box[0] + b1.box[2]) / 2)), String(Math.round((b1.box[1] + b1.box[3]) / 2))); await sleep(1500);
+        adb('shell', 'input', 'keyevent', '279'); await sleep(1500);
+        const b2 = bar(); D.paste.barText = red(b2 && b2.text || '');
+        D.paste.looksRight = /allowlist\.straycucks\.com\/me\/x-handoff\?c=/.test(b2 && b2.text || '');
+        writeFileSync(`${OUT}/${LABEL}-D1d-chrome-pasted-adb.png`, adb('exec-out', 'screencap', '-p'));
+        adb('shell', 'input', 'keyevent', '66'); await sleep(8000);
+      }
+      D.topAfterPaste = top();
+    }
     D.mmAfterTapUrl = red(await mm.url());
-    if (!D.openInChromeWorked && /^https:\/\/allowlist\.straycucks\.com\/me\/x-handoff\?c=/.test(String(hoUrl))) {
-      // the paste stand-in: open the same link in Chrome by an intent (Copy link + paste)
+    if (!D.openInChromeWorked && !D.paste?.looksRight && /^https:\/\/allowlist\.straycucks\.com\/me\/x-handoff\?c=/.test(String(hoUrl))) {
+      // paste did not land: the old stand-in, open the same link in Chrome by an intent
       adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${hoUrl}'`, 'com.android.chrome'); await sleep(8000);
       D.fallbackIntent = true; D.topAfterFallback = top();
     }
@@ -286,8 +329,10 @@ try {
       if (!D.trip.reachedX) { D.shotStuck = await ch.shot('D3-chrome-spam-check', '#ho-x'); writeFileSync(`${OUT}/${LABEL}-D3-chrome-stuck-adb.png`, adb('exec-out', 'screencap', '-p')); }
       ch.close();
     }
-    D.pass = !!(D.link?.['x-ho-link']?.shown && D.linkButtons?.some(b => /Copy link/.test(b.text)) && D.linkButtons?.some(b => /Open in Chrome/.test(b.text)) && D.chromePage?.['ho-go']?.shown && D.trip?.reachedX);
-    log('D', { pass: D.pass, openInChromeWorked: D.openInChromeWorked, fallback: !!D.fallbackIntent, reachedX: D.trip?.reachedX, xUrl: D.trip?.xUrl });
+    D.pass = !!(D.link?.['x-ho-link']?.shown && D.linkButtons?.some(b => /Copy link/.test(b.text)) && D.chromeHidden === true && /Tap Copy link, then paste it in Chrome or Safari\./.test(D.pasteLine?.['x-ho-paste']?.text || '') && D.pasteLine?.['x-ho-paste']?.shown && D.chromePage?.['ho-go']?.shown);
+    D.copyPass = !!(/Link copied/.test(String(D.copyStatus)) && D.clipboardMatches?.same);
+    D.reloadPass = !!(D.reload?.sameLink && D.reload?.page?.['x-ho-link']?.shown);
+    log('D', { pass: D.pass, copyPass: D.copyPass, reloadPass: D.reloadPass, pasted: D.paste?.looksRight, chromeHidden: D.chromeHidden, openInChromeWorked: D.openInChromeWorked, fallback: !!D.fallbackIntent, reachedX: D.trip?.reachedX, xUrl: D.trip?.xUrl });
     // ---- E: back to the wallet tab: it polls
     const E = R.cases.E = {};
     adb('shell', 'monkey', '-p', 'io.metamask', '-c', 'android.intent.category.LAUNCHER', '1'); await sleep(10000);
@@ -306,11 +351,15 @@ try {
     }
     E.mmUrl = red(await mm.url());
     await sleep(6000);
-    E.page = await mm.ev(VIS(['x-ho', 'x-ho-link', 'x-ho-ready', 'x-ho-who', 'x-ho-st', 'x-st']));
+    try { E.mmTabs = (await (await fetch(BASE + '/json', { signal: AbortSignal.timeout(5000) })).json()).filter(x => x.type === 'page').map(x => red(x.url)); } catch (e) { E.mmTabs = String(e); }
+    E.hasSaved = await mm.ev(`!!sessionStorage.getItem('sc_xho')`);
+    E.page = await mm.ev(VIS(['x-ho', 'x-ho-link', 'x-ho-ready', 'x-ho-who', 'x-ho-st', 'x-st', 'x-ho-paste']));
+    if (E.page?.['x-ho-link']) E.page['x-ho-link'].text = red(E.page['x-ho-link'].text);
+    E.linkAgain = !!E.page?.['x-ho-link']?.shown;
     E.poll = await mm.ev(`fetch('/api/w/x/handoff',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){return {state:j.state, handle:j.handle||null}})`);
     E.shot = await mm.shot('E1-wallet-tab-after-chrome', '#x-ho');
     E.pass = ['waiting', 'started'].includes(E.poll?.state) && !E.page?.['x-ho-ready']?.shown;
-    log('E', { pass: E.pass, poll: E.poll, note: E.note });
+    log('E', { pass: E.pass, poll: E.poll, note: E.note, linkAgain: E.linkAgain, hasSaved: E.hasSaved, tabs: E.mmTabs });
     // ---- F: abandoned: a link nobody finishes runs out (a fresh link, this tab kept open in front)
     if (process.env.SKIP_EXPIRY !== '1') {
       const F = R.cases.F = {};
