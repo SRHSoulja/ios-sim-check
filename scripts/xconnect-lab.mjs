@@ -124,6 +124,18 @@ async function toX(c, btnSel, tag, maxS = 90) {
   }
   log(tag, r); return r;
 }
+// Turnstile fails on the emulator (error 600010 after its box is ticked, run 43685238444), so the page never gets the X
+// address. The synthetic trip does what the page does after a passed check (xWent marker in this tab, then
+// location.assign to X) and then Back: the "did not finish" logic runs for real, the spam check and /api/w/x/* do not.
+async function synthTrip(c, kind, tag) {
+  const r = { synthetic: true };
+  await c.ev(`(sessionStorage.setItem('sc_x_went', JSON.stringify({k:${JSON.stringify(kind)}, at: Date.now()})), location.assign('https://x.com/i/flow/login'), true)`);
+  await sleep(15000);
+  r.xUrl = red(await c.url()); r.xTitle = await c.ev('document.title');
+  r.xText = await c.ev(`(document.body&&document.body.innerText||'').replace(/\\s+/g,' ').trim().slice(0,400)`);
+  r.shot = await c.shot(tag + '-x-synthetic');
+  log(tag, r); return r;
+}
 async function waitFor(c, expr, maxS = 30) { for (let i = 0; i < maxS; i++) { const v = await c.ev(expr); if (v === true) return true; await sleep(1000); } return false; }
 
 // ---------------- run ----------------
@@ -142,6 +154,7 @@ try {
   if (A.inappButtons && A.inappButtons.find(b => /Copy link/.test(b.text))) { await mm.tapSel('#x-inapp button'); await sleep(1500); A.copyStatus = await mm.ev(`(document.querySelector('#x-inapp .status')||{}).innerText||''`); A.shotCopy = await mm.shot('A2-copy-tapped', '#x-inapp'); }
   await mm.tapSel('#age'); await sleep(500); A.age = await mm.ev(`document.getElementById('age')&&document.getElementById('age').checked`);
   A.trip = await toX(mm, '#x-login', 'A3-signin-x');
+  if (!A.trip.reachedX) { A.tripShot = await mm.shot('A3-spam-check-stuck', '#out-st'); A.synth = await synthTrip(mm, 'login', 'A3s-signin'); A.trip.reachedX = /x\.com/.test(A.synth.xUrl); }
   if (A.trip.reachedX) {
     await mm.ev('history.back(), true'); await sleep(10000);
     await waitFor(mm, `/allowlist\\.straycucks\\.com\\/me/.test(location.href) && !!document.getElementById('out-st') && document.getElementById('out-st').innerText.length > 0`, 25);
@@ -158,6 +171,16 @@ try {
   await mm.ev(`(function(){var a=document.getElementById('age'); if(a&&!a.checked){a.click()} return true})()`);
   // every wallet request the page makes, with its answer or error (run 43683584888: personal_sign failed "must provide an Ethereum address")
   B.hook = await mm.ev(`(function(){window.__ethlog=[];function wrap(p,n){if(!p||p.__w)return;p.__w=1;var o=p.request.bind(p);p.request=function(a){var e={n:n,m:a&&a.method,p:JSON.stringify(a&&a.params||null).slice(0,200)};window.__ethlog.push(e);return o(a).then(function(r){e.r=JSON.stringify(r).slice(0,200);return r},function(x){e.err=String(x&&x.message)+' code='+(x&&x.code);throw x})}}wrap(window.ethereum,'window.ethereum');window.addEventListener('eip6963:announceProvider',function(ev){wrap(ev.detail.provider,(ev.detail.info&&ev.detail.info.name)||'6963')});window.dispatchEvent(new Event('eip6963:requestProvider'));return true})()`);
+  // Lab pre-step (PRESWITCH=1, default on): MetaMask 8.19 grants a site its account per network, and the page's switch to
+  // Robinhood Chain AFTER Connect leaves personal_sign with no permitted account ("must provide an Ethereum address",
+  // runs 43684498482, 43685238444). Adding and switching to chain 4663 BEFORE Connect lets the sign-in through, so the
+  // X cases can run; it also tests that order as the fix.
+  if (process.env.PRESWITCH !== '0') {
+    await mm.ev(`(window.__sw='pending', window.ethereum.request({method:'wallet_addEthereumChain',params:[{chainId:'0x1237',chainName:'Robinhood Chain',nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},rpcUrls:['https://rpc.mainnet.chain.robinhood.com'],blockExplorerUrls:['https://robinhoodchain.blockscout.com']}]}).then(function(r){window.__sw='ok '+JSON.stringify(r)},function(e){window.__sw='ERR '+e.message}), true)`);
+    B.preswitchApprove = await walletApprove(mm, `window.__sw!=='pending'`, 60);
+    B.preswitch = { result: await mm.ev('window.__sw'), chain: await mm.ev(`window.ethereum.request({method:'eth_chainId'})`) };
+    log('B-preswitch', B.preswitch);
+  }
   B.tap = await mm.tapSel('#signin');
   B.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
   B.eth = await mm.ev('window.__ethlog');
@@ -186,6 +209,7 @@ try {
     C.hoBox = await mm.ev(VIS(['x-ho', 'x-ho-why', 'x-ho-make', 'x-oauth', 'x-ho-here']));
     C.shotBox = await mm.shot('C1-handoff-box', '#x-ho');
     C.trip = await toX(mm, '#x-oauth', 'C2-link-here-x');
+    if (!C.trip.reachedX) { C.synth = await synthTrip(mm, 'link', 'C2s-link'); C.trip.reachedX = /x\.com/.test(C.synth.xUrl); }
     if (C.trip.reachedX) {
       await mm.ev('history.back(), true'); await sleep(10000);
       await waitFor(mm, `!!document.getElementById('x-st') && document.getElementById('x-st').innerText.length > 0`, 25);
@@ -228,6 +252,7 @@ try {
       D.trip = await toX(ch, '#ho-x', 'D3-chrome-x', 120);
       if (D.trip.reachedX) writeFileSync(`${OUT}/${LABEL}-D3-chrome-x-adb.png`, adb('exec-out', 'screencap', '-p'));
       D.chromeStatus = D.trip.reachedX ? null : await ch.ev(`(document.getElementById('ho-st')||{}).innerText||''`);
+      if (!D.trip.reachedX) { D.shotStuck = await ch.shot('D3-chrome-spam-check', '#ho-x'); writeFileSync(`${OUT}/${LABEL}-D3-chrome-stuck-adb.png`, adb('exec-out', 'screencap', '-p')); }
       ch.close();
     }
     D.pass = !!(D.link?.['x-ho-link']?.shown && D.linkButtons?.some(b => /Copy link/.test(b.text)) && D.linkButtons?.some(b => /Open in Chrome/.test(b.text)) && D.chromePage?.['ho-go']?.shown && D.trip?.reachedX);
