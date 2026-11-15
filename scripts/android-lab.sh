@@ -56,14 +56,16 @@ mm_setup() {   # install MetaMask (the verified release APK) and walk its first 
   adb shell monkey -p io.metamask -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 20
   # a throwaway wallet: random password made here, never printed or kept; MetaMask's screens are FLAG_SECURE, so
   # adb screencaps of them come out black (the texts in mm-walk-NN.txt are the record; the page itself is shot over CDP)
-  APP=io.metamask PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
+  MM_PW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)Aa1!"   # kept in this shell only, for the unlock screen
+  APP=io.metamask PW="$MM_PW" timeout 900 node scripts/ui-walk.mjs shots/mm-walk "${MM_STEPS:-30}" '^(browser|explore)$' 2>&1 | tee -a shots/lab.log
 }
 mm_open() {   # $1 url: open it in MetaMask's in-app browser, forward its WebView devtools socket to 9222; 0 = found
   local d="${1#https://}" s sock
   note "metamask deep link metamask://dapp/$d"
   adb shell am start -a android.intent.action.VIEW -d "'metamask://dapp/$d'" >/dev/null 2>&1 || true
   sleep 30; adb exec-out screencap -p > shots/mm-dapp-1.png
-  APP=io.metamask PW=x WALK='["^got it$","^not now$","^close$","^ok$","^dismiss$"]' timeout 120 node scripts/ui-walk.mjs shots/mm-dapp 3 'straycucks' 2>&1 | tee -a shots/lab.log
+  # MetaMask can come back locked (run 43687232153: "Enter password / Unlock"): type the run's password and Unlock
+  APP=io.metamask PW="${MM_PW:-x}" WALK='["^unlock$","^got it$","^not now$","^close$","^ok$","^dismiss$"]' timeout 180 node scripts/ui-walk.mjs shots/mm-dapp 6 'straycucks' 2>&1 | tee -a shots/lab.log
   sock=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ')
   note "metamask webview devtools sockets: ${sock:-none}"
   for s in $sock; do
