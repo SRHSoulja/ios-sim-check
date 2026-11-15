@@ -107,7 +107,9 @@ async function toX(c, btnSel, tag, maxS = 90) {
     if (tsTapped < 3 && Date.now() - t0 > 10000 * (tsTapped + 1)) {
       // Turnstile's interactive box ("Verify you are human"): it sits in a closed shadow root, so '#ts iframe' finds
       // nothing (run 43683584888); a real touch through Android on the node uiautomator sees
-      const nodes = ui(); const cb = nodes.find(n => n.box && /CheckBox/.test(n.class || '') ) || nodes.find(n => n.box && /^Verify you are human$/i.test(n.label));
+      // the CheckBox on the same row as "Verify you are human" (the first CheckBox on /me is the 18+ box: run 43684498482)
+      const nodes = ui(); const lab = nodes.find(n => n.box && /^Verify you are human$/i.test(n.label));
+      const cb = lab && (nodes.find(n => n.box && /CheckBox/.test(n.class || '') && n.box[1] < lab.box[3] && n.box[3] > lab.box[1] && n !== lab) || lab);
       r.tsSeen = nodes.filter(n => /verify|human|success|fail|checking|stuck|refresh/i.test(n.label)).map(n => n.label).slice(0, 8);
       if (cb) { const x = Math.round((cb.box[0] + cb.box[2]) / 2), y = Math.round((cb.box[1] + cb.box[3]) / 2); adb('shell', 'input', 'tap', String(x), String(y)); tsTapped++; r.tsTapped = tsTapped; r.tsTap = [x, y, cb.class, cb.label]; }
     }
@@ -159,6 +161,20 @@ try {
   B.tap = await mm.tapSel('#signin');
   B.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
   B.eth = await mm.ev('window.__ethlog');
+  if (/must provide an Ethereum address/.test(String(B.approve.pageError || ''))) {
+    // MetaMask 8.19: the page adds and switches to Robinhood Chain after Connect, then personal_sign finds no account
+    // permitted for that chain (CAIP-25 scope, RPCMethodMiddleware checkActiveAccountAndChainId). Probe: ask for the
+    // account permission again on the new chain, then press Sign in with wallet again.
+    B.retry = {};
+    await mm.ev(`(window.__perm=null, window.ethereum.request({method:'wallet_requestPermissions',params:[{eth_accounts:{}}]}).then(function(r){window.__perm=JSON.stringify(r).slice(0,300)},function(e){window.__perm='ERR '+e.message}), true)`);
+    B.retry.permApprove = await walletApprove(mm, `window.__perm!==null`, 60);
+    B.retry.perm = await mm.ev('window.__perm');
+    await mm.ev(`(document.getElementById('out-st').textContent='', window.__ethlog=[], true)`);
+    B.retry.tap = await mm.tapSel('#signin');
+    B.retry.approve = await walletApprove(mm, `(function(){var i=document.getElementById('in'); return !!(i && !i.hidden)})()`, 150);
+    B.retry.eth = await mm.ev('window.__ethlog');
+    log('B-retry', { perm: B.retry.perm, ok: B.retry.approve.ok, err: B.retry.approve.pageError });
+  }
   B.page = await mm.ev(VIS(['in', 'out-st', 'w-count', 'wallets', 'x', 'x-new', 'x-a', 'x-ho', 'x-oauth', 'x-a-note', 'x-st']));
   B.shot = await mm.shot('B1-signed-in', '#w-h');
   B.pass = !!B.page?.in?.shown;
