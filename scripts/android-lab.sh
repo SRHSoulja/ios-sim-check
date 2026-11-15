@@ -38,7 +38,7 @@ rels() {   # $1 label prefix: rel-lab.mjs per room url (chair from the url), the
     note "$p-c$c $u"; PROTO=cdp HOLDER="${HOLDER:-}" PARTS="${PARTS:-}" timeout 1700 node scripts/rel-lab.mjs shots "$p-c$c" "$c" >> shots/lab.log 2>&1 || note "$p-c$c rel-lab exit $?"; done
   if [ -n "$OS_URL" ]; then c=$(echo "$OS_URL" | grep -oE '[0-9]+$')
     note "$p-os-real $OS_URL"; PROTO=cdp OS_ITEM="$OS_URL" timeout 600 node scripts/rel-lab.mjs shots "$p-os-real" "$c" >> shots/lab.log 2>&1 || note "$p-os-real exit $?"
-    note "$p-os-harness /alive/$c framed at $HURL"; PROTO=cdp HARNESS=1 timeout 600 node scripts/rel-lab.mjs shots "$p-os-harness" "$c" >> shots/lab.log 2>&1 || note "$p-os-harness exit $?"
+    for hh in perf 3d; do note "$p-os-harness-$hh /alive/$c framed at $HURL"; PROTO=cdp HARNESS=1 HHASH="$([ $hh = perf ] && echo perf || echo "3d&perf")" timeout 600 node scripts/rel-lab.mjs shots "$p-os-harness-$hh" "$c" >> shots/lab.log 2>&1 || note "$p-os-harness-$hh exit $?"; done
   fi
 }
 HURL=https://opensea.io/__device-lab-harness
