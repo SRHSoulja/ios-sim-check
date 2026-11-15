@@ -149,6 +149,16 @@ async function synthTrip(c, kind, tag) {
   r.shot = await c.shot(tag + '-x-synthetic');
   log(tag, r); return r;
 }
+// MetaMask locks itself while Chrome is in front (run 43695364826: "Enter password / Unlock"); MM_PW is the run's
+// throwaway wallet password (android-lab.sh, never printed)
+async function unlockIfNeeded() {
+  const nodes = ui(); if (!nodes.some(n => /^unlock$/i.test(n.label))) return false;
+  const f = nodes.find(n => n.box && /EditText/.test(n.class || ''));
+  if (f && process.env.MM_PW) { adb('shell', 'input', 'tap', String(Math.round((f.box[0] + f.box[2]) / 2)), String(Math.round((f.box[1] + f.box[3]) / 2))); await sleep(500); adb('shell', 'input', 'text', process.env.MM_PW); await sleep(500); try { adb('shell', 'input', 'keyevent', '111'); } catch (e) {} }
+  const u = ui().find(n => n.box && /^unlock$/i.test(n.label) && /Button|ViewGroup|TextView/.test(n.class || ''));
+  if (u) { adb('shell', 'input', 'tap', String(Math.round((u.box[0] + u.box[2]) / 2)), String(Math.round((u.box[1] + u.box[3]) / 2))); await sleep(10000); }
+  return true;
+}
 async function waitFor(c, expr, maxS = 30) { for (let i = 0; i < maxS; i++) { const v = await c.ev(expr); if (v === true) return true; await sleep(1000); } return false; }
 
 // ---------------- run ----------------
@@ -282,12 +292,14 @@ try {
     const E = R.cases.E = {};
     adb('shell', 'monkey', '-p', 'io.metamask', '-c', 'android.intent.category.LAUNCHER', '1'); await sleep(10000);
     E.top = top();
+    E.unlocked = await unlockIfNeeded();
     E.oldTab = await mm.ev('document.visibilityState', 6000);
     if (E.oldTab !== 'visible') {
       // as the Chrome page says: "Open the Stray Cucks page in your wallet app again"
       E.note = 'old tab not answering (' + JSON.stringify(E.oldTab) + '); reopened by metamask://dapp link';
       try { mm.close(); } catch (e) {}
       adb('shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', "'metamask://dapp/allowlist.straycucks.com/me/settings'"); await sleep(25000);
+      E.unlocked2 = await unlockIfNeeded(); await sleep(5000);
       E.ui = ui().filter(n => n.label).map(n => n.label).slice(0, 12);
       mm = (await cdpLive(BASE, 'straycucks.com', 'mm')) || mm;
       await waitFor(mm, `document.getElementById('loading').hidden && !document.getElementById('in').hidden`, 30);

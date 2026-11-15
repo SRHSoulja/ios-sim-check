@@ -100,7 +100,7 @@ for ph in ${PHASES:-chrome}; do
       sleep 10; adb exec-out screencap -p > shots/xc-chrome-ready.png; adb shell am force-stop com.android.chrome
       mm_setup
       for u in "${LIST[@]}"; do
-        if mm_open "$u"; then timeout 2400 node scripts/xconnect-lab.mjs http://localhost:9222 shots xc "$u" 2>&1 | tee -a shots/lab.log || note "xconnect exit $?"
+        if mm_open "$u"; then MM_PW="$MM_PW" timeout 2400 node scripts/xconnect-lab.mjs http://localhost:9222 shots xc "$u" 2>&1 | tee -a shots/lab.log || note "xconnect exit $?"
         else note "xconnect: no straycucks page in MetaMask's browser"; adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml > shots/mm-dapp-ui.xml; fi
       done ;;
     metamask)
