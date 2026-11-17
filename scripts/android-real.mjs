@@ -26,7 +26,16 @@ const room = () => page.frames().find(f => /^https:\/\/straycucks\.com\/alive\/\
 const inner = re => page.frames().find(f => re.test(f.url()));
 const R = page.frameLocator('iframe.os-item-media');
 await page.goto(ITEM, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(e => say('goto ' + e.message.slice(0, 100)));
-await sleep(8000);
+for (let i = 0; i < 24 && /Just a moment/.test(await page.title()); i++) await sleep(2500);
+let LABEL = 'REAL OpenSea item page';
+if (/Just a moment/.test(await page.title())) {
+  say('CLOUDFLARE CHALLENGE did not clear in 60 s on the item page'); await shot('cloudflare-challenge');
+  // fallback, NOT the real page: a page at an opensea.io address with OpenSea's exact iframe attributes and class
+  await page.route('https://opensea.io/__harness', r => r.fulfill({ contentType: 'text/html', body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#121212"><iframe allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" sandbox="allow-scripts" src="' + new URL(ITEM).pathname.replace(/.*\//, 'https://straycucks.com/alive/') + '" title="Item Media" class="os-item-media" style="border:0;width:100vw;height:100vw"></iframe>' }));
+  await page.goto('https://opensea.io/__harness', { waitUntil: 'domcontentloaded' }); LABEL = 'HARNESS (NOT the real page)';
+}
+say('MODE: ' + LABEL);
+await sleep(6000);
 say('title: ' + await page.title()); say('ua: ' + await page.evaluate(() => navigator.userAgent)); say('viewport: ' + await page.evaluate(() => innerWidth + 'x' + innerHeight + ' dpr ' + devicePixelRatio));
 say('iframes: ' + JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('iframe')].map(f => f.outerHTML.slice(0, 260)))));
 await shot('item');
