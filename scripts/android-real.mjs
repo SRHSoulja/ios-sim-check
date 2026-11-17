@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 const ITEM = process.env.ITEM, OUT = process.env.OUT || 'shots/real', MAXG = Number(process.env.GAMES || 2);
 mkdirSync(OUT, { recursive: true });
 const out = []; const say = s => { out.push(s); console.log(s); writeFileSync(OUT + '/result.txt', out.join('\n')); };
-const ok = (c, w) => say((c ? 'ok   ' : 'FAIL ') + w);
+const ok = (c, w) => { say((c ? 'ok   ' : 'FAIL ') + w); return !!c; };
 const b = await chromium.connectOverCDP('http://localhost:9222');
 const ctx = b.contexts()[0], page = ctx.pages()[0] || await ctx.newPage();
 const cdp = await ctx.newCDPSession(page);
