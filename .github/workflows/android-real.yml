@@ -1,0 +1,44 @@
+# Drive room pages (menu, Diorama, taps) in Android browsers on an emulator: the image's Chrome, a Chromium snapshot,
+# a Chromium WebView (the engine every Android wallet's in-app browser uses) in its test shell, and MetaMask's own
+# in-app browser (official APK from MetaMask's GitHub release, sha256 and signature checked, throwaway wallet).
+# Run: gh workflow run android-lab.yml -R SRHSoulja/ios-sim-check -f phases="chrome chromium webview" \
+#        -f urls="https://straycucks.com/alive/312#pchtml&perf" -f os_url="https://straycucks.com/alive/312"
+name: android-real
+on:
+  workflow_dispatch:
+    inputs:
+      item: { description: "OpenSea item url", required: true }
+      games: { description: "games to play", required: false, default: "2" }
+      api: { description: "Android API level", required: false, default: "36" }
+permissions: { contents: read }
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator and the lab
+        # inputs through env only; all logic in scripts/android-real.sh (the action runs each script line in its own sh)
+        timeout-minutes: 105
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env: { ITEM: "${{ inputs.item }}", GAMES: "${{ inputs.games }}" }
+        with:
+          api-level: ${{ inputs.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 4096M
+          disk-size: 8000M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash scripts/android-real.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: android-real, path: shots, retention-days: 7 }
