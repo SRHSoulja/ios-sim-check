@@ -35,6 +35,7 @@ if (/Just a moment/.test(await page.title())) {
   await page.goto('https://opensea.io/__harness', { waitUntil: 'domcontentloaded' }); LABEL = 'HARNESS (NOT the real page)';
 }
 say('MODE: ' + LABEL);
+for (let k = 0; k < 3; k++) { const vs = await page.evaluate(() => document.visibilityState).catch(() => 'err'); say('visibility ' + vs); if (vs === 'visible') break; await shot('hidden-tab-switcher'); execFileSync('adb', ['shell', 'input', 'tap', '280', '650']); await sleep(2500); }
 await sleep(6000);
 say('title: ' + await page.title()); say('ua: ' + await page.evaluate(() => navigator.userAgent)); say('viewport: ' + await page.evaluate(() => innerWidth + 'x' + innerHeight + ' dpr ' + devicePixelRatio));
 say('iframes: ' + JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('iframe')].map(f => f.outerHTML.slice(0, 260)))));
